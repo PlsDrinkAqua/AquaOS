@@ -37,8 +37,12 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "hello") == 0) {
-        exec("/hello");
-        printf("exec failed: /hello\n");
+        int pid = spawn("/hello");
+        if (pid < 0) {
+            printf("spawn failed: /hello\n");
+        } else if (wait(pid) < 0) {
+            printf("wait failed: %d\n", pid);
+        }
         return;
     }
 

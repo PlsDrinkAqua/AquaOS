@@ -28,6 +28,8 @@ string/strlen.o \
 syscall/syscall.o \
 unistd/exec.o \
 unistd/read.o \
+unistd/spawn.o \
+unistd/wait.o \
 unistd/write.o \
 zenos/readline.o \
 zenos/terminal.o

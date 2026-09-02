@@ -17,8 +17,8 @@
 #include <kernel/ext2_api.h>
 #include <kernel/elf.h>
 #include <kernel/tss.h>
+#include <kernel/task.h>
 
-#define USER_STACK_TOP 0xBFFFE000
 #define VMM_PRESENT  (1<<0)
 #define VMM_RW       (1<<1)
 #define VMM_USER     (1<<2)
@@ -66,14 +66,14 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 	ext2_init();
 	kprintf("done \n");
 
-	kprintf("Initilizing User Heap Allocator.................");
-	user_heap_init();
+	kprintf("Initilizing Task Manager.................");
+	tasking_init();
 	kprintf("done \n");
 
-        kprintf("Loading User Programme.................");
-        elf_load_result_t res;
-        int ret = elf_load_from_file("/shell", &res);
-        kprintf("elf_load ret=%d entry=0x%x heap=0x%x\n", ret, res.entry, res.heap_start);
+        kprintf("Loading Init Task.................");
+        uint32_t user_entry = 0;
+        uint32_t user_stack = 0;
+        int ret = task_start_init("/shell", &user_entry, &user_stack);
         if (ret < 0) {
             kprintf("failed to load /shell\n");
             for (;;) {
@@ -83,27 +83,18 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
         kprintf("\n");
         kprintf("done \n");
 
-	kprintf("Creating User Stack.................");
-	// 先给 user stack 映射一页
-	uintptr_t stack_page = USER_STACK_TOP - 0x1000;
-	uint32_t stack_phys = pmm_alloc_frame();
-	vmm_map_page(stack_page, stack_phys, VMM_PRESENT | VMM_RW | VMM_USER);
-	kmemset((void *)stack_page, 0, 0x1000);
-	kprintf("done \n");
-
-
 	// Enable interrupts globally.
 	kprintf("Enabling interrupts.................");
 	__asm__ volatile ("sti");
 	// asm volatile ("1: jmp 1b");
 	kprintf("done \n");
     kprintf("About to enter user mode...\n");
-	kprintf("entry: 0x%x, stack: 0x%x",res.entry,USER_STACK_TOP);
+	kprintf("entry: 0x%x, stack: 0x%x", user_entry, user_stack);
 
 	uint32_t kernel_stack_top = (uint32_t)&stack_top;
 	tss_set_kernel_stack(kernel_stack_top);
 
-	jump_usermode(res.entry, USER_STACK_TOP);
+	jump_usermode(user_entry, user_stack);
 
     kprintf("ERROR: returned from user mode switch!\n");
     while (1) {

@@ -9,6 +9,8 @@ enum {
     SYS_CLEAR   = 4,
     SYS_EXIT    = 5,
     SYS_EXEC    = 6,
+    SYS_SPAWN   = 7,
+    SYS_WAIT    = 8,
 };
 
 #ifdef __cplusplus

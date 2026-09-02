@@ -12,6 +12,8 @@ extern "C" {
 ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int exec(const char *path);
+int spawn(const char *path);
+int wait(int pid);
 
 #ifdef __cplusplus
 }
