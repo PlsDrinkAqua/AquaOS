@@ -90,7 +90,8 @@ void keyboard_isr() {
         : scancode_to_ascii[scancode];
 
     if (ascii) {
-        keyboard_buffer_push(ascii);
-        task_wake_keyboard_waiter();
+        if (!task_complete_keyboard_read(ascii)) {
+            keyboard_buffer_push(ascii);
+        }
     }
 }

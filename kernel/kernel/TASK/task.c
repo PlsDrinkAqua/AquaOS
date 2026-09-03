@@ -416,30 +416,42 @@ void task_preempt_current(interrupt_frame_t *regs) {
     task_schedule(regs);
 }
 
-int task_block_current_for_keyboard(interrupt_frame_t *regs) {
-    if (!current_task || !regs) {
+int task_block_current_for_keyboard(interrupt_frame_t *regs, char *buf, uint32_t count) {
+    if (!current_task || !regs || !buf || count == 0) {
         return -1;
     }
 
     current_task->saved_regs = *regs;
     current_task->saved_regs.eax = 0;
+    current_task->keyboard_read_buf = (uint32_t)buf;
+    current_task->keyboard_read_count = count;
     current_task->waiting_for_keyboard = 1;
     current_task->state = TASK_BLOCKED;
 
     return task_schedule(regs) < 0 ? -1 : 0;
 }
 
-void task_wake_keyboard_waiter(void) {
+int task_complete_keyboard_read(char c) {
     for (uint32_t i = 0; i < TASK_MAX; i++) {
         task_t *task = &task_table[i];
 
         if (task->state == TASK_BLOCKED && task->waiting_for_keyboard) {
+            page_directory_t *old_pd = vmm_current_address_space();
+
+            vmm_switch_address_space(task->address_space);
+            *((char *)task->keyboard_read_buf) = c;
+            vmm_switch_address_space(old_pd);
+
+            task->keyboard_read_buf = 0;
+            task->keyboard_read_count = 0;
             task->waiting_for_keyboard = 0;
-            task->saved_regs.eax = 0;
+            task->saved_regs.eax = 1;
             task->state = TASK_READY;
-            return;
+            return 1;
         }
     }
+
+    return 0;
 }
 
 void task_sleep_current(uint32_t sleep_ticks, interrupt_frame_t *regs) {

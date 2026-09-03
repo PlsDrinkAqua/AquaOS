@@ -68,7 +68,7 @@ void syscall_handler(interrupt_frame_t *regs)
                 int c = keyboard_getchar();
                 if (c < 0) {
                     if (read == 0) {
-                        task_block_current_for_keyboard(regs);
+                        task_block_current_for_keyboard(regs, buf, count);
                         return;
                     }
                     break;
