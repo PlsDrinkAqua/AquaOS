@@ -23,7 +23,7 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, memtest, taskinfo");
+        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, taskinfo");
         return;
     }
 
@@ -56,6 +56,16 @@ static void run_command(const char *line) {
         int pid = spawn("/memtest");
         if (pid < 0) {
             printf("spawn failed: /memtest\n");
+        } else if (wait(pid) < 0) {
+            printf("wait failed: %d\n", pid);
+        }
+        return;
+    }
+
+    if (strcmp(line, "yieldtest") == 0) {
+        int pid = spawn("/yieldtest");
+        if (pid < 0) {
+            printf("spawn failed: /yieldtest\n");
         } else if (wait(pid) < 0) {
             printf("wait failed: %d\n", pid);
         }

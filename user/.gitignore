@@ -2,5 +2,7 @@
 *.kernel
 *.o
 /hello
+/memtest
 /shell
 /userprog
+/yieldtest

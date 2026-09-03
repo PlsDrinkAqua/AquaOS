@@ -29,7 +29,9 @@ typedef struct syscall_registers {
 
 typedef enum {
     TASK_UNUSED = 0,
+    TASK_READY,
     TASK_RUNNING,
+    TASK_BLOCKED,
     TASK_EXITED,
 } task_state_t;
 
@@ -55,8 +57,10 @@ task_t *task_current(void);
 int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out);
 int task_exec_current(const char *path, syscall_registers_t *regs);
 int task_spawn_current(const char *path, syscall_registers_t *regs);
-int task_wait_current(uint32_t pid);
+void task_yield_current(syscall_registers_t *regs);
+void task_wait_current(uint32_t pid, syscall_registers_t *regs);
 void task_exit_current(int status, syscall_registers_t *regs);
 void task_dump_current(syscall_registers_t *regs);
+void task_reap_exited_children(void);
 
 #endif

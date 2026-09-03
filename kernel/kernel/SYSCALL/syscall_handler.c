@@ -19,10 +19,13 @@ enum {
     SYS_WAIT    = 8,
     SYS_TASKINFO = 9,
     SYS_SBRK    = 10,
+    SYS_YIELD   = 11,
 };
 
 void syscall_handler(syscall_registers_t *regs)
 {
+    task_reap_exited_children();
+
     switch (regs->eax) {
         case SYS_PUTCHAR:
             terminal_putchar(regs->ebx);
@@ -99,7 +102,7 @@ void syscall_handler(syscall_registers_t *regs)
         }
 
         case SYS_WAIT:
-            regs->eax = (uint32_t)task_wait_current(regs->ebx);
+            task_wait_current(regs->ebx, regs);
             break;
 
         case SYS_TASKINFO:
@@ -109,6 +112,10 @@ void syscall_handler(syscall_registers_t *regs)
 
         case SYS_SBRK:
             regs->eax = (uint32_t)sys_sbrk((intptr_t)regs->ebx);
+            break;
+
+        case SYS_YIELD:
+            task_yield_current(regs);
             break;
 
         default:

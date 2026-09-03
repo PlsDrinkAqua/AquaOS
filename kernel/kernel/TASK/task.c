@@ -30,8 +30,12 @@ static const char *task_state_name(task_state_t state) {
     switch (state) {
         case TASK_UNUSED:
             return "UNUSED";
+        case TASK_READY:
+            return "READY";
         case TASK_RUNNING:
             return "RUNNING";
+        case TASK_BLOCKED:
+            return "BLOCKED";
         case TASK_EXITED:
             return "EXITED";
         default:
@@ -78,6 +82,23 @@ static task_t *task_find_by_pid(uint32_t pid) {
     for (uint32_t i = 0; i < TASK_MAX; i++) {
         if (task_table[i].state != TASK_UNUSED && task_table[i].pid == pid) {
             return &task_table[i];
+        }
+    }
+
+    return NULL;
+}
+
+static uint32_t task_index(task_t *task) {
+    return (uint32_t)(task - task_table);
+}
+
+static task_t *task_pick_next_ready(void) {
+    uint32_t start = current_task ? task_index(current_task) + 1 : 0;
+
+    for (uint32_t offset = 0; offset < TASK_MAX; offset++) {
+        uint32_t index = (start + offset) % TASK_MAX;
+        if (task_table[index].state == TASK_READY) {
+            return &task_table[index];
         }
     }
 
@@ -136,6 +157,35 @@ static void task_switch_to(task_t *task) {
     tss_set_kernel_stack(task->kernel_stack_top);
 }
 
+static int task_schedule(syscall_registers_t *regs) {
+    task_t *prev = current_task;
+    task_t *next;
+
+    if (!regs) {
+        return -1;
+    }
+
+    if (prev && prev->state == TASK_RUNNING) {
+        prev->saved_regs = *regs;
+        prev->state = TASK_READY;
+    }
+
+    next = task_pick_next_ready();
+    if (!next) {
+        if (prev && prev->state == TASK_READY) {
+            prev->state = TASK_RUNNING;
+            regs->eax = 0;
+            return 0;
+        }
+        return -1;
+    }
+
+    next->state = TASK_RUNNING;
+    task_switch_to(next);
+    *regs = next->saved_regs;
+    return 0;
+}
+
 static int task_prepare_user_stack(task_t *task) {
     uintptr_t stack_page = USER_STACK_TOP - PAGE_SIZE;
 
@@ -184,7 +234,7 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
     task->heap_start = res.heap_start;
     task->heap_brk = res.heap_start;
     task->heap_limit = USER_HEAP_LIMIT;
-    task->state = TASK_RUNNING;
+    task->state = TASK_READY;
     task->exit_status = 0;
     kmemcpy(task->image_path, image_path, sizeof(task->image_path));
     return 0;
@@ -239,6 +289,7 @@ int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out) 
     }
 
     task_switch_to(current_task);
+    current_task->state = TASK_RUNNING;
 
     if (entry_out) {
         *entry_out = current_task->entry;
@@ -285,6 +336,7 @@ int task_exec_current(const char *path, syscall_registers_t *regs) {
     regs->eip = current_task->entry;
     regs->useresp = current_task->user_stack_top;
     regs->eax = 0;
+    current_task->state = TASK_RUNNING;
 
     kprintf("task: pid=%u exec %s entry=0x%x\n",
             current_task->pid,
@@ -320,11 +372,12 @@ int task_spawn_current(const char *path, syscall_registers_t *regs) {
         return -1;
     }
 
-    task_switch_to(child);
-
-    regs->eip = child->entry;
-    regs->useresp = child->user_stack_top;
-    regs->eax = 0;
+    child->saved_regs = *regs;
+    child->saved_regs.eip = child->entry;
+    child->saved_regs.useresp = child->user_stack_top;
+    child->saved_regs.eax = 0;
+    child->state = TASK_READY;
+    regs->eax = child->pid;
 
     kprintf("task: pid=%u spawned child pid=%u image=%s entry=0x%x\n",
             parent->pid,
@@ -335,30 +388,70 @@ int task_spawn_current(const char *path, syscall_registers_t *regs) {
     return 0;
 }
 
-int task_wait_current(uint32_t pid) {
+void task_yield_current(syscall_registers_t *regs) {
+    if (task_schedule(regs) < 0 && regs) {
+        regs->eax = 0;
+    }
+}
+
+void task_wait_current(uint32_t pid, syscall_registers_t *regs) {
     task_t *child;
     int status;
 
-    if (!current_task || pid == 0) {
-        return -1;
+    if (!current_task || !regs || pid == 0) {
+        if (regs) {
+            regs->eax = (uint32_t)-1;
+        }
+        return;
     }
 
     child = task_find_by_pid(pid);
     if (!child || child->parent_pid != current_task->pid) {
-        return -1;
+        regs->eax = (uint32_t)-1;
+        return;
     }
 
-    if (child->state != TASK_EXITED) {
-        return -1;
+    if (child->state == TASK_EXITED) {
+        status = child->exit_status;
+        if (child->address_space) {
+            vmm_destroy_address_space(child->address_space);
+        }
+        task_free_kernel_stack(child);
+        kmemset(child, 0, sizeof(*child));
+        regs->eax = (uint32_t)status;
+        return;
     }
 
-    status = child->exit_status;
-    if (child->address_space) {
-        vmm_destroy_address_space(child->address_space);
+    current_task->saved_regs = *regs;
+    current_task->state = TASK_BLOCKED;
+    if (task_schedule(regs) < 0) {
+        current_task->state = TASK_RUNNING;
+        regs->eax = (uint32_t)-1;
     }
-    task_free_kernel_stack(child);
-    kmemset(child, 0, sizeof(*child));
-    return status;
+}
+
+void task_reap_exited_children(void) {
+    task_t *parent = current_task;
+
+    if (!parent) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < TASK_MAX; i++) {
+        task_t *child = &task_table[i];
+
+        if (child == parent ||
+            child->state != TASK_EXITED ||
+            child->parent_pid != parent->pid) {
+            continue;
+        }
+
+        if (child->address_space) {
+            vmm_destroy_address_space(child->address_space);
+        }
+        task_free_kernel_stack(child);
+        kmemset(child, 0, sizeof(*child));
+    }
 }
 
 void task_exit_current(int status, syscall_registers_t *regs) {
@@ -382,12 +475,16 @@ void task_exit_current(int status, syscall_registers_t *regs) {
 
     parent = task_find_by_pid(exiting->parent_pid);
     if (parent) {
-        task_switch_to(parent);
-        *regs = parent->saved_regs;
+        if (parent->state == TASK_BLOCKED) {
+            parent->saved_regs.eax = (uint32_t)status;
+            parent->state = TASK_READY;
+        }
 
-        kprintf("task: resumed parent pid=%u image=%s\n",
-                parent->pid,
-                parent->image_path);
+        if (task_schedule(regs) < 0) {
+            task_switch_to(parent);
+            parent->state = TASK_RUNNING;
+            *regs = parent->saved_regs;
+        }
         return;
     }
 

@@ -16,6 +16,7 @@ int exec(const char *path);
 int spawn(const char *path);
 int wait(int pid);
 void *sbrk(intptr_t increment);
+int yield(void);
 
 #ifdef __cplusplus
 }

@@ -33,6 +33,7 @@ unistd/sbrk.o \
 unistd/spawn.o \
 unistd/wait.o \
 unistd/write.o \
+unistd/yield.o \
 zenos/readline.o \
 zenos/task.o \
 zenos/terminal.o
