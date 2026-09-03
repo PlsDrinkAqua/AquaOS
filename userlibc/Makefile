@@ -28,6 +28,7 @@ string/strlen.o \
 syscall/syscall.o \
 unistd/exec.o \
 unistd/read.o \
+unistd/sbrk.o \
 unistd/spawn.o \
 unistd/wait.o \
 unistd/write.o \

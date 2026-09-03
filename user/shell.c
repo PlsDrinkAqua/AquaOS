@@ -33,7 +33,7 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "about") == 0) {
-        puts("ZenOS userland shell");
+        puts("AquaOS userland shell");
         return;
     }
 
@@ -63,10 +63,10 @@ static void run_command(const char *line) {
 void _start(void) {
     char line[LINE_MAX];
 
-    printf("ZenOS shell at %x\n", 0x08048000);
+    printf("AquaOS shell at %x\n", 0x08048000);
 
     for (;;) {
-        write_str("ZenOS> ");
+        write_str("AquaOS> ");
         zenos_readline(line, sizeof(line));
         run_command(line);
     }

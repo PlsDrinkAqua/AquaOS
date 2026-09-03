@@ -41,6 +41,9 @@ typedef struct {
     uint32_t user_stack_top;
     uint32_t kernel_stack_base;
     uint32_t kernel_stack_top;
+    uint32_t heap_start;
+    uint32_t heap_brk;
+    uint32_t heap_limit;
     page_directory_t *address_space;
     uint32_t parent_pid;
     syscall_registers_t saved_regs;

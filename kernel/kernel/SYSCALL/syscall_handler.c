@@ -5,6 +5,7 @@
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
 #include <kernel/task.h>
+#include <kernel/user_heap.h>
 
 enum {
     SYS_PUTCHAR = 0,
@@ -17,6 +18,7 @@ enum {
     SYS_SPAWN   = 7,
     SYS_WAIT    = 8,
     SYS_TASKINFO = 9,
+    SYS_SBRK    = 10,
 };
 
 void syscall_handler(syscall_registers_t *regs)
@@ -103,6 +105,10 @@ void syscall_handler(syscall_registers_t *regs)
         case SYS_TASKINFO:
             task_dump_current(regs);
             regs->eax = 0;
+            break;
+
+        case SYS_SBRK:
+            regs->eax = (uint32_t)sys_sbrk((intptr_t)regs->ebx);
             break;
 
         default:

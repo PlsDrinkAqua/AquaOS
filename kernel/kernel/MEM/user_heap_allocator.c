@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include "kernel/vmm.h"
 #include "kernel/pmm.h"
+#include "kernel/task.h"
 #include "kernel/user_heap.h"
 
 #define PAGE_SIZE       0x1000U
@@ -13,33 +14,28 @@
 #define VMM_RW       (1 << 1)
 #define VMM_USER     (1 << 2)
 
-#define USER_HEAP_START  0x40000000U
-#define USER_HEAP_LIMIT  0x80000000U
-
-static uintptr_t user_heap_start = USER_HEAP_START;
-static uintptr_t user_brk        = USER_HEAP_START;
-static uintptr_t user_heap_limit = USER_HEAP_LIMIT;
-
-void user_heap_init(void) {
-    user_heap_start = USER_HEAP_START;
-    user_brk        = USER_HEAP_START;
-    user_heap_limit = USER_HEAP_LIMIT;
-}
-
 uintptr_t user_heap_start_vaddr(void) {
-    return user_heap_start;
+    task_t *task = task_current();
+    return task ? task->heap_start : 0;
 }
 
 uintptr_t user_heap_brk_vaddr(void) {
-    return user_brk;
+    task_t *task = task_current();
+    return task ? task->heap_brk : 0;
 }
 
 uintptr_t user_heap_limit_vaddr(void) {
-    return user_heap_limit;
+    task_t *task = task_current();
+    return task ? task->heap_limit : 0;
 }
 
 void *sys_sbrk(intptr_t increment) {
-    uintptr_t old_brk = user_brk;
+    task_t *task = task_current();
+    if (!task) {
+        return (void *)-1;
+    }
+
+    uintptr_t old_brk = task->heap_brk;
     uintptr_t new_brk;
 
     // sbrk(0): just return current break
@@ -49,20 +45,20 @@ void *sys_sbrk(intptr_t increment) {
 
     // 防止整数溢出/下溢
     if (increment > 0) {
-        if (old_brk > user_heap_limit - (uintptr_t)increment) {
+        if (old_brk > task->heap_limit - (uintptr_t)increment) {
             return (void *)-1;
         }
         new_brk = old_brk + (uintptr_t)increment;
     } else {
         uintptr_t dec = (uintptr_t)(-increment);
-        if (old_brk < user_heap_start + dec) {
+        if (old_brk < task->heap_start + dec) {
             return (void *)-1;
         }
         new_brk = old_brk - dec;
     }
 
     // 再做一次边界检查
-    if (new_brk < user_heap_start || new_brk > user_heap_limit) {
+    if (new_brk < task->heap_start || new_brk > task->heap_limit) {
         return (void *)-1;
     }
 
@@ -114,6 +110,6 @@ void *sys_sbrk(intptr_t increment) {
         }
     }
 
-    user_brk = new_brk;
+    task->heap_brk = new_brk;
     return (void *)old_brk;
 }

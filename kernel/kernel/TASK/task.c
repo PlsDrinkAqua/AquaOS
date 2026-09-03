@@ -16,6 +16,7 @@
 #define VMM_PRESENT  (1u << 0)
 #define VMM_RW       (1u << 1)
 #define VMM_USER     (1u << 2)
+#define USER_HEAP_LIMIT 0x80000000U
 
 static task_t task_table[TASK_MAX];
 static task_t *current_task;
@@ -179,9 +180,10 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
     }
     vmm_switch_address_space(old_pd);
 
-    user_heap_init();
-
     task->entry = res.entry;
+    task->heap_start = res.heap_start;
+    task->heap_brk = res.heap_start;
+    task->heap_limit = USER_HEAP_LIMIT;
     task->state = TASK_RUNNING;
     task->exit_status = 0;
     kmemcpy(task->image_path, image_path, sizeof(task->image_path));
@@ -201,11 +203,13 @@ static int task_create_and_load_image(task_t *task, const char *path) {
 
     pd = vmm_create_address_space();
     if (!pd) {
+        task_free_kernel_stack(task);
         return -1;
     }
 
     if (task_load_image_into_space(task, path, pd) < 0) {
         vmm_destroy_address_space(pd);
+        task_free_kernel_stack(task);
         return -1;
     }
 
