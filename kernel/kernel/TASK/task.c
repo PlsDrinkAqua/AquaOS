@@ -398,6 +398,38 @@ void task_preempt_current(interrupt_frame_t *regs) {
     task_schedule(regs);
 }
 
+int task_block_current_for_keyboard(interrupt_frame_t *regs) {
+    if (!current_task || !regs) {
+        return -1;
+    }
+
+    current_task->saved_regs = *regs;
+    current_task->saved_regs.eax = 0;
+    current_task->waiting_for_keyboard = 1;
+    current_task->state = TASK_BLOCKED;
+
+    if (task_schedule(regs) < 0) {
+        current_task->waiting_for_keyboard = 0;
+        current_task->state = TASK_RUNNING;
+        return -1;
+    }
+
+    return 0;
+}
+
+void task_wake_keyboard_waiter(void) {
+    for (uint32_t i = 0; i < TASK_MAX; i++) {
+        task_t *task = &task_table[i];
+
+        if (task->state == TASK_BLOCKED && task->waiting_for_keyboard) {
+            task->waiting_for_keyboard = 0;
+            task->saved_regs.eax = 0;
+            task->state = TASK_READY;
+            return;
+        }
+    }
+}
+
 void task_wait_current(uint32_t pid, interrupt_frame_t *regs) {
     task_t *child;
     int status;

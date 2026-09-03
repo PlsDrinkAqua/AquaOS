@@ -66,6 +66,19 @@ void syscall_handler(interrupt_frame_t *regs)
             while (read < count) {
                 int c = keyboard_getchar();
                 if (c < 0) {
+                    if (read == 0) {
+                        if (task_block_current_for_keyboard(regs) == 0) {
+                            return;
+                        }
+
+                        do {
+                            __asm__ volatile ("sti; hlt" ::: "memory");
+                            c = keyboard_getchar();
+                        } while (c < 0);
+
+                        buf[read++] = (char)c;
+                        continue;
+                    }
                     break;
                 }
 

@@ -32,6 +32,7 @@ typedef struct {
     page_directory_t *address_space;
     uint32_t parent_pid;
     uint32_t waiting_for_pid;
+    uint8_t waiting_for_keyboard;
     uint8_t wait_status_delivered;
     interrupt_frame_t saved_regs;
     int exit_status;
@@ -44,6 +45,8 @@ int task_exec_current(const char *path, interrupt_frame_t *regs);
 int task_spawn_current(const char *path, interrupt_frame_t *regs);
 void task_yield_current(interrupt_frame_t *regs);
 void task_preempt_current(interrupt_frame_t *regs);
+int task_block_current_for_keyboard(interrupt_frame_t *regs);
+void task_wake_keyboard_waiter(void);
 void task_wait_current(uint32_t pid, interrupt_frame_t *regs);
 void task_exit_current(int status, interrupt_frame_t *regs);
 void task_dump_current(interrupt_frame_t *regs);

@@ -1,5 +1,6 @@
 #include <kernel/io.h>
 #include <kernel/keyboard.h>
+#include <kernel/task.h>
 #include <stdbool.h>
 
 #define KEYBOARD_DATA_PORT 0x60
@@ -90,5 +91,6 @@ void keyboard_isr() {
 
     if (ascii) {
         keyboard_buffer_push(ascii);
+        task_wake_keyboard_waiter();
     }
 }
