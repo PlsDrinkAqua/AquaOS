@@ -157,7 +157,7 @@ static void task_switch_to(task_t *task) {
     tss_set_kernel_stack(task->kernel_stack_top);
 }
 
-static int task_schedule(syscall_registers_t *regs) {
+static int task_schedule(interrupt_frame_t *regs) {
     task_t *prev = current_task;
     task_t *next;
 
@@ -174,7 +174,6 @@ static int task_schedule(syscall_registers_t *regs) {
     if (!next) {
         if (prev && prev->state == TASK_READY) {
             prev->state = TASK_RUNNING;
-            regs->eax = 0;
             return 0;
         }
         return -1;
@@ -183,7 +182,7 @@ static int task_schedule(syscall_registers_t *regs) {
     next->state = TASK_RUNNING;
     task_switch_to(next);
     *regs = next->saved_regs;
-    return 0;
+    return 1;
 }
 
 static int task_prepare_user_stack(task_t *task) {
@@ -307,7 +306,7 @@ int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out) 
     return 0;
 }
 
-int task_exec_current(const char *path, syscall_registers_t *regs) {
+int task_exec_current(const char *path, interrupt_frame_t *regs) {
     page_directory_t *old_pd;
     page_directory_t *new_pd;
 
@@ -346,7 +345,7 @@ int task_exec_current(const char *path, syscall_registers_t *regs) {
     return 0;
 }
 
-int task_spawn_current(const char *path, syscall_registers_t *regs) {
+int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     task_t *parent = current_task;
     task_t *child;
     char image_path[TASK_IMAGE_PATH_BYTES];
@@ -388,13 +387,18 @@ int task_spawn_current(const char *path, syscall_registers_t *regs) {
     return 0;
 }
 
-void task_yield_current(syscall_registers_t *regs) {
-    if (task_schedule(regs) < 0 && regs) {
+void task_yield_current(interrupt_frame_t *regs) {
+    int switched = task_schedule(regs);
+    if (switched <= 0 && regs) {
         regs->eax = 0;
     }
 }
 
-void task_wait_current(uint32_t pid, syscall_registers_t *regs) {
+void task_preempt_current(interrupt_frame_t *regs) {
+    task_schedule(regs);
+}
+
+void task_wait_current(uint32_t pid, interrupt_frame_t *regs) {
     task_t *child;
     int status;
 
@@ -423,8 +427,10 @@ void task_wait_current(uint32_t pid, syscall_registers_t *regs) {
     }
 
     current_task->saved_regs = *regs;
+    current_task->waiting_for_pid = pid;
     current_task->state = TASK_BLOCKED;
     if (task_schedule(regs) < 0) {
+        current_task->waiting_for_pid = 0;
         current_task->state = TASK_RUNNING;
         regs->eax = (uint32_t)-1;
     }
@@ -442,7 +448,8 @@ void task_reap_exited_children(void) {
 
         if (child == parent ||
             child->state != TASK_EXITED ||
-            child->parent_pid != parent->pid) {
+            child->parent_pid != parent->pid ||
+            !child->wait_status_delivered) {
             continue;
         }
 
@@ -454,9 +461,10 @@ void task_reap_exited_children(void) {
     }
 }
 
-void task_exit_current(int status, syscall_registers_t *regs) {
+void task_exit_current(int status, interrupt_frame_t *regs) {
     task_t *exiting;
     task_t *parent;
+    bool parent_woken = false;
 
     if (!current_task || !regs) {
         for (;;) {
@@ -475,15 +483,26 @@ void task_exit_current(int status, syscall_registers_t *regs) {
 
     parent = task_find_by_pid(exiting->parent_pid);
     if (parent) {
-        if (parent->state == TASK_BLOCKED) {
+        if (parent->state == TASK_BLOCKED &&
+            parent->waiting_for_pid == exiting->pid) {
             parent->saved_regs.eax = (uint32_t)status;
+            parent->waiting_for_pid = 0;
             parent->state = TASK_READY;
+            exiting->wait_status_delivered = 1;
+            parent_woken = true;
         }
 
         if (task_schedule(regs) < 0) {
-            task_switch_to(parent);
-            parent->state = TASK_RUNNING;
-            *regs = parent->saved_regs;
+            if (parent_woken) {
+                task_switch_to(parent);
+                parent->state = TASK_RUNNING;
+                *regs = parent->saved_regs;
+                return;
+            }
+
+            for (;;) {
+                __asm__ volatile ("hlt");
+            }
         }
         return;
     }
@@ -508,7 +527,7 @@ void task_exit_current(int status, syscall_registers_t *regs) {
     regs->eax = 0;
 }
 
-void task_dump_current(syscall_registers_t *regs) {
+void task_dump_current(interrupt_frame_t *regs) {
     task_t *task = current_task;
     uint32_t user_stack_base;
     uint32_t heap_start;

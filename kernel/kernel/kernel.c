@@ -17,6 +17,7 @@
 #include <kernel/ext2_api.h>
 #include <kernel/elf.h>
 #include <kernel/task.h>
+#include <kernel/timer.h>
 
 #define VMM_PRESENT  (1<<0)
 #define VMM_RW       (1<<1)
@@ -63,6 +64,10 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 	kprintf("Initilizing EXT2 File System.................");
 	ext2_init();
 	kprintf("done \n");
+
+    kprintf("Initilizing Timer.................");
+    timer_init(100);
+    kprintf("done \n");
 
 	kprintf("Initilizing Task Manager.................");
 	tasking_init();

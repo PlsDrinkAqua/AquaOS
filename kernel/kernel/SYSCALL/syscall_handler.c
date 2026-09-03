@@ -22,7 +22,7 @@ enum {
     SYS_YIELD   = 11,
 };
 
-void syscall_handler(syscall_registers_t *regs)
+void syscall_handler(interrupt_frame_t *regs)
 {
     task_reap_exited_children();
 

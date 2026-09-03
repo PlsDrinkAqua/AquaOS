@@ -16,7 +16,7 @@ isr128:
     movw %ax, %fs
     movw %ax, %gs
 
-    pushl %esp            # 传 registers_t* 给 C
+    pushl %esp            # pass interrupt_frame_t* to C
     call syscall_handler
     addl $4, %esp
 

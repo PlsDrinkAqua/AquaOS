@@ -60,11 +60,27 @@ irq_common_stub:
     pushal             # Save all general-purpose registers
     cld                # Clear DF for C code
 
-    movl %esp, %eax    # EAX now points to the register block (includes dummy error code and int number)
+    movw %ds, %ax
+    pushl %eax
+
+    movw $0x10, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+
+    movl %esp, %eax    # EAX points to saved DS slot
+    addl $4, %eax      # Skip saved DS slot; now points to interrupt_frame_t
     pushl %eax      	# Push pointer as argument to the C handler
     
     call    interrupt_handler  # Call your C handler
     addl $4, %esp      # Clean up the argument (pointer)
+
+    popl %eax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
 
     popal              # Restore general-purpose registers
     addl $8, %esp      # Clean up the two pushed values: dummy error code and interrupt number
