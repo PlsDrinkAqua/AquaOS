@@ -32,6 +32,7 @@ unistd/spawn.o \
 unistd/wait.o \
 unistd/write.o \
 zenos/readline.o \
+zenos/task.o \
 zenos/terminal.o
 
 .PHONY: all clean

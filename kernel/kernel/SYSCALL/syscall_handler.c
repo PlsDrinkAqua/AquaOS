@@ -16,6 +16,7 @@ enum {
     SYS_EXEC    = 6,
     SYS_SPAWN   = 7,
     SYS_WAIT    = 8,
+    SYS_TASKINFO = 9,
 };
 
 void syscall_handler(syscall_registers_t *regs)
@@ -97,6 +98,11 @@ void syscall_handler(syscall_registers_t *regs)
 
         case SYS_WAIT:
             regs->eax = (uint32_t)task_wait_current(regs->ebx);
+            break;
+
+        case SYS_TASKINFO:
+            task_dump_current(regs);
+            regs->eax = 0;
             break;
 
         default:

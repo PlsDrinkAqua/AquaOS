@@ -3,8 +3,19 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <kernel/paging.h>
 
 void vmm_init();
+
+page_directory_t *vmm_create_address_space(void);
+
+void vmm_destroy_address_space(page_directory_t *pd);
+
+void vmm_switch_address_space(page_directory_t *pd);
+
+page_directory_t *vmm_current_address_space(void);
+
+void vmm_sync_kernel_mappings(page_directory_t *pd);
 
 int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags);
 

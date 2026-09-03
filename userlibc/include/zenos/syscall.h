@@ -11,6 +11,7 @@ enum {
     SYS_EXEC    = 6,
     SYS_SPAWN   = 7,
     SYS_WAIT    = 8,
+    SYS_TASKINFO = 9,
 };
 
 #ifdef __cplusplus

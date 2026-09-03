@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <zenos/readline.h>
+#include <zenos/task.h>
 #include <zenos/terminal.h>
 
 #define LINE_MAX 128
@@ -22,7 +23,7 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "help") == 0) {
-        puts("commands: help, echo, about, clear, hello");
+        puts("commands: help, echo, about, clear, hello, taskinfo");
         return;
     }
 
@@ -33,6 +34,11 @@ static void run_command(const char *line) {
 
     if (strcmp(line, "about") == 0) {
         puts("ZenOS userland shell");
+        return;
+    }
+
+    if (strcmp(line, "taskinfo") == 0) {
+        zenos_taskinfo();
         return;
     }
 

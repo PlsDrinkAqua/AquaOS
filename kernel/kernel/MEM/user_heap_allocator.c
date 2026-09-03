@@ -26,6 +26,18 @@ void user_heap_init(void) {
     user_heap_limit = USER_HEAP_LIMIT;
 }
 
+uintptr_t user_heap_start_vaddr(void) {
+    return user_heap_start;
+}
+
+uintptr_t user_heap_brk_vaddr(void) {
+    return user_brk;
+}
+
+uintptr_t user_heap_limit_vaddr(void) {
+    return user_heap_limit;
+}
+
 void *sys_sbrk(intptr_t increment) {
     uintptr_t old_brk = user_brk;
     uintptr_t new_brk;

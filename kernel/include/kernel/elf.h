@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <kernel/paging.h>
 
 /* ===== ELF fixed-width types ===== */
 typedef uint16_t Elf32_Half;
@@ -78,6 +79,52 @@ enum {
 #define PT_NULL    0
 #define PT_LOAD    1
 
+/* ===== Section header ===== */
+typedef struct {
+    Elf32_Word sh_name;
+    Elf32_Word sh_type;
+    Elf32_Word sh_flags;
+    Elf32_Addr sh_addr;
+    Elf32_Off  sh_offset;
+    Elf32_Word sh_size;
+    Elf32_Word sh_link;
+    Elf32_Word sh_info;
+    Elf32_Word sh_addralign;
+    Elf32_Word sh_entsize;
+} Elf32_Shdr;
+
+/* ===== Symbol table entry ===== */
+typedef struct {
+    Elf32_Word  st_name;
+    Elf32_Addr  st_value;
+    Elf32_Word  st_size;
+    uint8_t     st_info;
+    uint8_t     st_other;
+    Elf32_Half  st_shndx;
+} Elf32_Sym;
+
+/* ===== Relocation entries ===== */
+typedef struct {
+    Elf32_Addr r_offset;
+    Elf32_Word r_info;
+} Elf32_Rel;
+
+#define SHT_REL     9
+#define SHT_DYNSYM  11
+#define SHT_SYMTAB  2
+
+#define SHN_UNDEF   0
+
+#define ELF32_R_SYM(info)  ((info) >> 8)
+#define ELF32_R_TYPE(info) ((uint8_t)(info))
+
+#define R_386_NONE      0
+#define R_386_32        1
+#define R_386_PC32      2
+#define R_386_GLOB_DAT  6
+#define R_386_JMP_SLOT  7
+#define R_386_RELATIVE  8
+
 /* ===== Segment flags ===== */
 #define PF_X 0x1
 #define PF_W 0x2
@@ -94,3 +141,8 @@ int elf_load_from_memory(const void *image, size_t image_size, elf_load_result_t
 
 /* 从 ext2 路径读取并加载 */
 int elf_load_from_file(const char *path, elf_load_result_t *out);
+
+/* 从 ext2 路径读取，并加载到指定地址空间 */
+int elf_load_from_file_into_address_space(const char *path,
+                                          page_directory_t *pd,
+                                          elf_load_result_t *out);

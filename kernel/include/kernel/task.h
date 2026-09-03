@@ -2,9 +2,10 @@
 #define _KERNEL_TASK_H
 
 #include <stdint.h>
+#include <kernel/paging.h>
 
 #define USER_STACK_TOP 0xBFFFE000U
-#define TASK_USER_STACK_BYTES 4096U
+#define TASK_KERNEL_STACK_BYTES 4096U
 #define TASK_IMAGE_PATH_BYTES 64U
 #define TASK_MAX 16
 
@@ -38,9 +39,11 @@ typedef struct {
     char image_path[TASK_IMAGE_PATH_BYTES];
     uint32_t entry;
     uint32_t user_stack_top;
+    uint32_t kernel_stack_base;
+    uint32_t kernel_stack_top;
+    page_directory_t *address_space;
     uint32_t parent_pid;
     syscall_registers_t saved_regs;
-    uint8_t user_stack_snapshot[TASK_USER_STACK_BYTES];
     int exit_status;
 } task_t;
 
@@ -51,5 +54,6 @@ int task_exec_current(const char *path, syscall_registers_t *regs);
 int task_spawn_current(const char *path, syscall_registers_t *regs);
 int task_wait_current(uint32_t pid);
 void task_exit_current(int status, syscall_registers_t *regs);
+void task_dump_current(syscall_registers_t *regs);
 
 #endif

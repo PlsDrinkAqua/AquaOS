@@ -14,6 +14,10 @@
 #define VMM_RW       (1<<1)
 #define VMM_USER     (1<<2)
 
+#define ADDR_OFFSET        0xC0000000U
+// 页目录中重新映射到高端内核的索引：
+#define KERNEL_PD_INDEX    (ADDR_OFFSET >> 22)
+
 
 // 汇编里 .bss 分配的那 4 KiB 页目录
 extern page_directory_t boot_page_directory;
@@ -26,25 +30,104 @@ static inline void vmm_invlpg(uintptr_t vaddr) {
     asm volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
+static inline uintptr_t phys_to_virt(uintptr_t phys) {
+    return phys + KERNEL_VIRT_OFFSET;
+}
+
+static inline uintptr_t virt_to_phys(uintptr_t virt) {
+    return virt - KERNEL_VIRT_OFFSET;
+}
+
+static void vmm_refresh_ref_tables(void) {
+    for (int i = 0; i < PAGE_DIR_ENTRIES; i++) {
+        page_directory_entry_t pde = current_pd->entries[i];
+
+        if (pde.present && pde.page_size == 0) {
+            uint32_t pt_phys = pde.frame << 12;
+            ref_tables[i] = (page_table_t *)phys_to_virt(pt_phys);
+        } else {
+            ref_tables[i] = NULL;
+        }
+    }
+}
+
+static void vmm_load_cr3(page_directory_t *pd) {
+    uintptr_t pd_phys = virt_to_phys((uintptr_t)pd);
+    asm volatile("mov %0, %%cr3" : : "r"(pd_phys) : "memory");
+}
+
 
 void vmm_init(void) {
     // 1) 指向那个纯 PDE 数组
     current_pd = &boot_page_directory;
 
-    // 2) 遍历所有 PDE，给每个 4 KiB 页表项挂上虚拟指针
-    for (int i = 0; i < PAGE_DIR_ENTRIES; i++) {
-        page_directory_entry_t pde = current_pd->entries[i];
+    // 2) 遍历所有 PDE，给每个 4 KiB 页表项挂上虚拟指针
+    vmm_refresh_ref_tables();
+}
 
-        // 只处理 “present 且 PS=0（4 KiB 页表）” 的情况
-        if (pde.present && pde.page_size == 0) {
-            // physical base of the page-table page
-            uint32_t pt_phys = pde.frame << 12;
-            // convert to kernel virtual, then store in your ref_tables[]
-            ref_tables[i] = (page_table_t*)(pt_phys + KERNEL_VIRT_OFFSET);
-        } else {
-            ref_tables[i] = NULL;
-        }
+page_directory_t *vmm_current_address_space(void) {
+    return current_pd;
+}
+
+page_directory_t *vmm_create_address_space(void) {
+    uint32_t pd_phys = pmm_alloc_frame();
+    if (!pd_phys) {
+        return NULL;
     }
+
+    page_directory_t *pd = (page_directory_t *)phys_to_virt(pd_phys);
+    kmemset(pd, 0, sizeof(*pd));
+
+    for (uint32_t i = KERNEL_PD_INDEX; i < PAGE_DIR_ENTRIES; i++) {
+        pd->entries[i] = current_pd->entries[i];
+    }
+
+    return pd;
+}
+
+void vmm_sync_kernel_mappings(page_directory_t *pd) {
+    if (!pd) {
+        return;
+    }
+
+    for (uint32_t i = KERNEL_PD_INDEX; i < PAGE_DIR_ENTRIES; i++) {
+        pd->entries[i] = current_pd->entries[i];
+    }
+}
+
+void vmm_switch_address_space(page_directory_t *pd) {
+    if (!pd) {
+        return;
+    }
+
+    current_pd = pd;
+    vmm_refresh_ref_tables();
+    vmm_load_cr3(pd);
+}
+
+void vmm_destroy_address_space(page_directory_t *pd) {
+    if (!pd || pd == &boot_page_directory || pd == current_pd) {
+        return;
+    }
+
+    for (uint32_t pd_idx = 0; pd_idx < KERNEL_PD_INDEX; pd_idx++) {
+        page_directory_entry_t *pde = &pd->entries[pd_idx];
+        if (!pde->present || pde->page_size) {
+            continue;
+        }
+
+        page_table_t *pt = (page_table_t *)phys_to_virt((uintptr_t)pde->frame << 12);
+        for (uint32_t pt_idx = 0; pt_idx < PAGE_TABLE_ENTRIES; pt_idx++) {
+            if (pt->pages[pt_idx].present) {
+                pmm_free_frame(pt->pages[pt_idx].frame << 12);
+            }
+        }
+
+        pmm_free_frame(pde->frame << 12);
+        kmemset(pde, 0, sizeof(*pde));
+    }
+
+    pmm_free_frame(virt_to_phys((uintptr_t)pd));
 }
 
 int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags) {
@@ -299,10 +382,6 @@ int vmm_unmap_region(uintptr_t vstart,
 //                i, va, pa, (pa == 0) ? "UNMAPPED" : "STILL MAPPED");
 //     }
 // }
-
-#define ADDR_OFFSET        0xC0000000U
-// 页目录中重新映射到高端内核的索引：
-#define KERNEL_PD_INDEX    (ADDR_OFFSET >> 22)
 
 extern uint32_t boot_page_table1  [PAGE_TABLE_ENTRIES];
 
