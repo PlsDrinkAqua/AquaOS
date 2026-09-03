@@ -22,6 +22,7 @@ stdio/printf.o \
 stdio/putchar.o \
 stdio/puts.o \
 stdlib/exit.o \
+stdlib/malloc.o \
 string/strcmp.o \
 string/strncmp.o \
 string/strlen.o \

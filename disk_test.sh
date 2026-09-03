@@ -5,6 +5,7 @@ IMG=ext2_hda.img
 MNT=/mnt/ext2_test
 SHELL=./user/shell
 HELLO=./user/hello
+MEMTEST=./user/memtest
 
 . ./config.sh
 make -C user
@@ -24,6 +25,7 @@ echo "foo" | sudo tee "$MNT/subdir/bar.dat" > /dev/null
 
 sudo cp "$SHELL" "$MNT/shell"
 sudo cp "$HELLO" "$MNT/hello"
+sudo cp "$MEMTEST" "$MNT/memtest"
 
 # 确保写入磁盘
 sync
@@ -37,4 +39,3 @@ mkdir -p disk
 cp "./$IMG" disk/"$IMG"
 
 echo "Generation completed: $IMG with test files created"
-

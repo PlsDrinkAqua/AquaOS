@@ -19,7 +19,7 @@ LIBS:=$(LIBS) ../userlibc/libc.a -nostdlib -lgcc
 # 不要加 -D__is_kernel
 # 不要链接 -lk
 
-TARGETS = shell hello
+TARGETS = shell hello memtest
 
 .PHONY: all clean userlibc
 .SUFFIXES: .o .c .S
@@ -35,6 +35,9 @@ shell: shell.o userlibc user.ld
 hello: hello.o userlibc user.ld
 	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) hello.o $(LIBS)
 
+memtest: memtest.o userlibc user.ld
+	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) memtest.o $(LIBS)
+
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
@@ -43,7 +46,7 @@ hello: hello.o userlibc user.ld
 
 clean:
 	rm -f $(TARGETS)
-	rm -f shell.o hello.o *.d
+	rm -f shell.o hello.o memtest.o *.d
 	$(MAKE) -C ../userlibc clean
 
--include shell.d hello.d
+-include shell.d hello.d memtest.d

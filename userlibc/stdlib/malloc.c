@@ -1,0 +1,148 @@
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#define MALLOC_ALIGN 8U
+#define CHUNK_SIZE   4096U
+
+typedef struct malloc_block {
+    size_t size;
+    int free;
+    struct malloc_block *next;
+} malloc_block_t;
+
+static malloc_block_t *heap_head;
+static malloc_block_t *heap_tail;
+
+static size_t align_up(size_t value, size_t align) {
+    return (value + align - 1) & ~(align - 1);
+}
+
+static malloc_block_t *find_free_block(size_t size) {
+    malloc_block_t *cur = heap_head;
+
+    while (cur) {
+        if (cur->free && cur->size >= size) {
+            return cur;
+        }
+        cur = cur->next;
+    }
+
+    return NULL;
+}
+
+static void split_block(malloc_block_t *block, size_t size) {
+    size_t remaining;
+    malloc_block_t *split;
+
+    if (!block || block->size < size + sizeof(malloc_block_t) + MALLOC_ALIGN) {
+        return;
+    }
+
+    remaining = block->size - size - sizeof(malloc_block_t);
+    split = (malloc_block_t *)((uint8_t *)(block + 1) + size);
+    split->size = remaining;
+    split->free = 1;
+    split->next = block->next;
+
+    block->size = size;
+    block->next = split;
+
+    if (heap_tail == block) {
+        heap_tail = split;
+    }
+}
+
+static malloc_block_t *request_block(size_t size) {
+    size_t total = align_up(size + sizeof(malloc_block_t), CHUNK_SIZE);
+    malloc_block_t *block = sbrk((intptr_t)total);
+
+    if (block == (void *)-1) {
+        return NULL;
+    }
+
+    block->size = total - sizeof(malloc_block_t);
+    block->free = 0;
+    block->next = NULL;
+
+    if (heap_tail) {
+        heap_tail->next = block;
+    } else {
+        heap_head = block;
+    }
+    heap_tail = block;
+
+    split_block(block, size);
+    return block;
+}
+
+void *malloc(size_t size) {
+    malloc_block_t *block;
+
+    if (size == 0) {
+        return NULL;
+    }
+
+    size = align_up(size, MALLOC_ALIGN);
+    block = find_free_block(size);
+    if (!block) {
+        block = request_block(size);
+        if (!block) {
+            return NULL;
+        }
+    }
+
+    block->free = 0;
+    split_block(block, size);
+    return block + 1;
+}
+
+static void coalesce_free_blocks(void) {
+    malloc_block_t *cur = heap_head;
+
+    while (cur && cur->next) {
+        if (cur->free && cur->next->free) {
+            cur->size += sizeof(malloc_block_t) + cur->next->size;
+            cur->next = cur->next->next;
+            if (!cur->next) {
+                heap_tail = cur;
+            }
+        } else {
+            cur = cur->next;
+        }
+    }
+}
+
+void free(void *ptr) {
+    malloc_block_t *block;
+
+    if (!ptr) {
+        return;
+    }
+
+    block = ((malloc_block_t *)ptr) - 1;
+    block->free = 1;
+    coalesce_free_blocks();
+}
+
+void *calloc(size_t nmemb, size_t size) {
+    size_t total;
+    uint8_t *ptr;
+
+    if (nmemb != 0 && size > ((size_t)-1) / nmemb) {
+        return NULL;
+    }
+
+    total = nmemb * size;
+    ptr = malloc(total);
+    if (!ptr) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < total; i++) {
+        ptr[i] = 0;
+    }
+
+    return ptr;
+}
