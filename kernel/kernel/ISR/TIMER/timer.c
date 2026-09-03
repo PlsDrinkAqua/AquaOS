@@ -36,6 +36,7 @@ uint32_t timer_ticks(void) {
 
 void timer_isr(interrupt_frame_t *regs) {
     ticks++;
+    task_wake_sleepers(ticks);
 
     if ((ticks % TIMER_QUANTUM_TICKS) == 0) {
         task_preempt_current(regs);

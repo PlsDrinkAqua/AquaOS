@@ -4,5 +4,6 @@
 /hello
 /memtest
 /shell
+/sleeptest
 /userprog
 /yieldtest

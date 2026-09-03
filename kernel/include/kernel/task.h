@@ -15,6 +15,7 @@ typedef enum {
     TASK_READY,
     TASK_RUNNING,
     TASK_BLOCKED,
+    TASK_SLEEPING,
     TASK_EXITED,
 } task_state_t;
 
@@ -32,6 +33,7 @@ typedef struct {
     page_directory_t *address_space;
     uint32_t parent_pid;
     uint32_t waiting_for_pid;
+    uint32_t wake_tick;
     uint8_t waiting_for_keyboard;
     uint8_t wait_status_delivered;
     interrupt_frame_t saved_regs;
@@ -47,6 +49,8 @@ void task_yield_current(interrupt_frame_t *regs);
 void task_preempt_current(interrupt_frame_t *regs);
 int task_block_current_for_keyboard(interrupt_frame_t *regs);
 void task_wake_keyboard_waiter(void);
+void task_sleep_current(uint32_t ticks, interrupt_frame_t *regs);
+void task_wake_sleepers(uint32_t now);
 void task_wait_current(uint32_t pid, interrupt_frame_t *regs);
 void task_exit_current(int status, interrupt_frame_t *regs);
 void task_dump_current(interrupt_frame_t *regs);

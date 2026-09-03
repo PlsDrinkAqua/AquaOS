@@ -19,7 +19,7 @@ LIBS:=$(LIBS) ../userlibc/libc.a -nostdlib -lgcc
 # 不要加 -D__is_kernel
 # 不要链接 -lk
 
-TARGETS = shell hello memtest yieldtest
+TARGETS = shell hello memtest yieldtest sleeptest
 
 .PHONY: all clean userlibc
 .SUFFIXES: .o .c .S
@@ -41,6 +41,9 @@ memtest: memtest.o userlibc user.ld
 yieldtest: yieldtest.o userlibc user.ld
 	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) yieldtest.o $(LIBS)
 
+sleeptest: sleeptest.o userlibc user.ld
+	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) sleeptest.o $(LIBS)
+
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
@@ -49,7 +52,7 @@ yieldtest: yieldtest.o userlibc user.ld
 
 clean:
 	rm -f $(TARGETS)
-	rm -f shell.o hello.o memtest.o yieldtest.o *.d
+	rm -f shell.o hello.o memtest.o yieldtest.o sleeptest.o *.d
 	$(MAKE) -C ../userlibc clean
 
--include shell.d hello.d memtest.d yieldtest.d
+-include shell.d hello.d memtest.d yieldtest.d sleeptest.d

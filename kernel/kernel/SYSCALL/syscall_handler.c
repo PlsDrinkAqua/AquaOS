@@ -20,6 +20,7 @@ enum {
     SYS_TASKINFO = 9,
     SYS_SBRK    = 10,
     SYS_YIELD   = 11,
+    SYS_SLEEP   = 12,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -67,17 +68,8 @@ void syscall_handler(interrupt_frame_t *regs)
                 int c = keyboard_getchar();
                 if (c < 0) {
                     if (read == 0) {
-                        if (task_block_current_for_keyboard(regs) == 0) {
-                            return;
-                        }
-
-                        do {
-                            __asm__ volatile ("sti; hlt" ::: "memory");
-                            c = keyboard_getchar();
-                        } while (c < 0);
-
-                        buf[read++] = (char)c;
-                        continue;
+                        task_block_current_for_keyboard(regs);
+                        return;
                     }
                     break;
                 }
@@ -129,6 +121,10 @@ void syscall_handler(interrupt_frame_t *regs)
 
         case SYS_YIELD:
             task_yield_current(regs);
+            break;
+
+        case SYS_SLEEP:
+            task_sleep_current(regs->ebx, regs);
             break;
 
         default:

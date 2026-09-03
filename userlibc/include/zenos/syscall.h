@@ -14,6 +14,7 @@ enum {
     SYS_TASKINFO = 9,
     SYS_SBRK    = 10,
     SYS_YIELD   = 11,
+    SYS_SLEEP   = 12,
 };
 
 #ifdef __cplusplus

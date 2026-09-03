@@ -6,6 +6,7 @@ MNT=/mnt/ext2_test
 SHELL=./user/shell
 HELLO=./user/hello
 MEMTEST=./user/memtest
+SLEEPTEST=./user/sleeptest
 YIELDTEST=./user/yieldtest
 
 . ./config.sh
@@ -27,6 +28,7 @@ echo "foo" | sudo tee "$MNT/subdir/bar.dat" > /dev/null
 sudo cp "$SHELL" "$MNT/shell"
 sudo cp "$HELLO" "$MNT/hello"
 sudo cp "$MEMTEST" "$MNT/memtest"
+sudo cp "$SLEEPTEST" "$MNT/sleeptest"
 sudo cp "$YIELDTEST" "$MNT/yieldtest"
 
 # 确保写入磁盘

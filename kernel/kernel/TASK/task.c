@@ -8,6 +8,7 @@
 #include <kernel/kha.h>
 #include <kernel/pmm.h>
 #include <kernel/task.h>
+#include <kernel/timer.h>
 #include <kernel/tss.h>
 #include <kernel/user_heap.h>
 #include <kernel/vmm.h>
@@ -36,6 +37,8 @@ static const char *task_state_name(task_state_t state) {
             return "RUNNING";
         case TASK_BLOCKED:
             return "BLOCKED";
+        case TASK_SLEEPING:
+            return "SLEEPING";
         case TASK_EXITED:
             return "EXITED";
         default:
@@ -103,6 +106,12 @@ static task_t *task_pick_next_ready(void) {
     }
 
     return NULL;
+}
+
+static void task_idle_until_ready(void) {
+    while (!task_pick_next_ready()) {
+        __asm__ volatile ("sti; hlt" ::: "memory");
+    }
 }
 
 static task_t *task_alloc(void) {
@@ -176,7 +185,12 @@ static int task_schedule(interrupt_frame_t *regs) {
             prev->state = TASK_RUNNING;
             return 0;
         }
-        return -1;
+
+        task_idle_until_ready();
+        next = task_pick_next_ready();
+        if (!next) {
+            return -1;
+        }
     }
 
     next->state = TASK_RUNNING;
@@ -395,6 +409,10 @@ void task_yield_current(interrupt_frame_t *regs) {
 }
 
 void task_preempt_current(interrupt_frame_t *regs) {
+    if (!current_task || current_task->state != TASK_RUNNING) {
+        return;
+    }
+
     task_schedule(regs);
 }
 
@@ -408,13 +426,7 @@ int task_block_current_for_keyboard(interrupt_frame_t *regs) {
     current_task->waiting_for_keyboard = 1;
     current_task->state = TASK_BLOCKED;
 
-    if (task_schedule(regs) < 0) {
-        current_task->waiting_for_keyboard = 0;
-        current_task->state = TASK_RUNNING;
-        return -1;
-    }
-
-    return 0;
+    return task_schedule(regs) < 0 ? -1 : 0;
 }
 
 void task_wake_keyboard_waiter(void) {
@@ -426,6 +438,39 @@ void task_wake_keyboard_waiter(void) {
             task->saved_regs.eax = 0;
             task->state = TASK_READY;
             return;
+        }
+    }
+}
+
+void task_sleep_current(uint32_t sleep_ticks, interrupt_frame_t *regs) {
+    if (!current_task || !regs) {
+        return;
+    }
+
+    if (sleep_ticks == 0) {
+        regs->eax = 0;
+        return;
+    }
+
+    current_task->saved_regs = *regs;
+    current_task->saved_regs.eax = 0;
+    current_task->wake_tick = timer_ticks() + sleep_ticks;
+    current_task->state = TASK_SLEEPING;
+
+    if (task_schedule(regs) < 0) {
+        current_task->wake_tick = 0;
+        current_task->state = TASK_RUNNING;
+        regs->eax = (uint32_t)-1;
+    }
+}
+
+void task_wake_sleepers(uint32_t now) {
+    for (uint32_t i = 0; i < TASK_MAX; i++) {
+        task_t *task = &task_table[i];
+
+        if (task->state == TASK_SLEEPING && task->wake_tick <= now) {
+            task->wake_tick = 0;
+            task->state = TASK_READY;
         }
     }
 }
