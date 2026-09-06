@@ -8,6 +8,12 @@ typedef int ssize_t;
 typedef int off_t;
 
 #define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_ACCMODE 3
+#define O_CREAT  0x40
+#define O_TRUNC  0x200
+#define O_APPEND 0x400
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
@@ -20,6 +26,10 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int open(const char *path, int flags);
 int close(int fd);
+int dup(int oldfd);
+int dup2(int oldfd, int newfd);
+int pipe(int pipefd[2]);
+int fork(void);
 off_t lseek(int fd, off_t offset, int whence);
 int readdir(int fd, char *name, size_t name_size);
 int exec(const char *path);

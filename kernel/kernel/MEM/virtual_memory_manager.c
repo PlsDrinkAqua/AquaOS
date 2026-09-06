@@ -85,6 +85,52 @@ page_directory_t *vmm_create_address_space(void) {
     return pd;
 }
 
+page_directory_t *vmm_clone_address_space(page_directory_t *source) {
+    page_directory_t *old_pd = current_pd;
+    page_directory_t *clone;
+
+    if (!source) return NULL;
+    clone = vmm_create_address_space();
+    if (!clone) return NULL;
+
+    vmm_switch_address_space(clone);
+    for (uint32_t pd_idx = 0; pd_idx < KERNEL_PD_INDEX; pd_idx++) {
+        page_directory_entry_t *src_pde = &source->entries[pd_idx];
+        page_table_t *src_pt;
+
+        if (!src_pde->present || src_pde->page_size) continue;
+        src_pt = (page_table_t *)phys_to_virt((uintptr_t)src_pde->frame << 12);
+        for (uint32_t pt_idx = 0; pt_idx < PAGE_TABLE_ENTRIES; pt_idx++) {
+            page_table_entry_t *src_pte = &src_pt->pages[pt_idx];
+            uint32_t dst_phys;
+            uintptr_t vaddr;
+            uint32_t flags;
+
+            if (!src_pte->present) continue;
+            dst_phys = pmm_alloc_frame();
+            if (!dst_phys) goto fail;
+            vaddr = ((uintptr_t)pd_idx << 22) | ((uintptr_t)pt_idx << 12);
+            flags = VMM_PRESENT |
+                    (src_pte->rw ? VMM_RW : 0) |
+                    (src_pte->user ? VMM_USER : 0);
+            if (vmm_map_page(vaddr, dst_phys, flags) < 0) {
+                pmm_free_frame(dst_phys);
+                goto fail;
+            }
+            kmemcpy((void *)phys_to_virt(dst_phys),
+                    (const void *)phys_to_virt((uintptr_t)src_pte->frame << 12),
+                    PAGE_SIZE);
+        }
+    }
+    vmm_switch_address_space(old_pd);
+    return clone;
+
+fail:
+    vmm_switch_address_space(old_pd);
+    vmm_destroy_address_space(clone);
+    return NULL;
+}
+
 void vmm_sync_kernel_mappings(page_directory_t *pd) {
     if (!pd) {
         return;

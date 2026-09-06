@@ -29,7 +29,7 @@ void _start(void) {
         exit(4);
     }
     close(fd);
-    if (close(0) != -1 || open("/missing", O_RDONLY) != -1) {
+    if (close(-1) != -1 || open("/missing", O_RDONLY) != -1) {
         puts("fdtest: invalid operation accepted");
         exit(5);
     }

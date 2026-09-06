@@ -8,6 +8,7 @@
 void vmm_init();
 
 page_directory_t *vmm_create_address_space(void);
+page_directory_t *vmm_clone_address_space(page_directory_t *source);
 
 void vmm_destroy_address_space(page_directory_t *pd);
 

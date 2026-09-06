@@ -17,6 +17,7 @@ CPPFLAGS:=$(CPPFLAGS) -Iinclude
 TARGET=libc.a
 
 OBJS=\
+errno/errno.o \
 stdio/getchar.o \
 stdio/printf.o \
 stdio/putchar.o \
@@ -28,9 +29,12 @@ string/strncmp.o \
 string/strlen.o \
 syscall/syscall.o \
 unistd/close.o \
+unistd/dup.o \
 unistd/exec.o \
+unistd/fork.o \
 unistd/lseek.o \
 unistd/open.o \
+unistd/pipe.o \
 unistd/read.o \
 unistd/readdir.o \
 unistd/sbrk.o \

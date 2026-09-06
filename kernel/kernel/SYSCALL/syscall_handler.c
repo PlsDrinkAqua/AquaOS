@@ -2,6 +2,7 @@
 #include <libk/stdio.h>
 #include <libk/string.h>
 #include <kernel/elf.h>
+#include <kernel/errno.h>
 #include <kernel/fd.h>
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
@@ -28,6 +29,10 @@ enum {
     SYS_CLOSE   = 14,
     SYS_LSEEK   = 15,
     SYS_READDIR = 16,
+    SYS_FORK    = 17,
+    SYS_DUP     = 18,
+    SYS_DUP2    = 19,
+    SYS_PIPE    = 20,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -37,8 +42,9 @@ void syscall_handler(interrupt_frame_t *regs)
     switch (regs->eax) {
         case SYS_PUTCHAR: {
             char c = (char)regs->ebx;
-            if (fd_write(1, &c, 1) < 0) {
-                regs->eax = (uint32_t)-1;
+            int result = fd_write(1, &c, 1);
+            if (result < 0) {
+                regs->eax = (uint32_t)result;
                 break;
             }
             regs->eax = regs->ebx;
@@ -48,13 +54,34 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_WRITE: {
             const char *buf = (const char *)regs->ecx;
             uint32_t count = regs->edx;
+            uint32_t written = 0;
+            char chunk[256];
 
             if (!vmm_user_range_valid(buf, count, false)) {
-                regs->eax = (uint32_t)-1;
+                regs->eax = (uint32_t)-K_EFAULT;
                 break;
             }
-
-            regs->eax = (uint32_t)fd_write((int)regs->ebx, buf, count);
+            while (written < count) {
+                uint32_t wanted = count - written;
+                int n;
+                if (wanted > sizeof(chunk)) wanted = sizeof(chunk);
+                if (copy_from_user(chunk, buf + written, wanted) < 0) {
+                    regs->eax = (uint32_t)-K_EFAULT;
+                    break;
+                }
+                n = fd_write((int)regs->ebx, chunk, wanted);
+                if (n == -K_EAGAIN && written == 0 && fd_wait_object((int)regs->ebx)) {
+                    task_block_current_for_pipe(regs, fd_wait_object((int)regs->ebx));
+                    return;
+                }
+                if (n < 0) {
+                    regs->eax = written ? written : (uint32_t)n;
+                    break;
+                }
+                written += (uint32_t)n;
+                regs->eax = written;
+                if ((uint32_t)n < wanted) break;
+            }
             break;
         }
 
@@ -73,7 +100,7 @@ void syscall_handler(interrupt_frame_t *regs)
             }
 
             if (!vmm_user_range_valid(buf, count, true)) {
-                regs->eax = (uint32_t)-1;
+                regs->eax = (uint32_t)-K_EFAULT;
                 break;
             }
 
@@ -84,8 +111,12 @@ void syscall_handler(interrupt_frame_t *regs)
                     uint32_t wanted = count - read;
                     if (wanted > sizeof(chunk)) wanted = sizeof(chunk);
                     int n = fd_read((int)regs->ebx, chunk, wanted);
+                    if (n == -K_EAGAIN && read == 0 && fd_wait_object((int)regs->ebx)) {
+                        task_block_current_for_pipe(regs, fd_wait_object((int)regs->ebx));
+                        return;
+                    }
                     if (n < 0) {
-                        regs->eax = read ? read : (uint32_t)-1;
+                        regs->eax = read ? read : (uint32_t)n;
                         break;
                     }
                     if (n == 0) {
@@ -93,7 +124,7 @@ void syscall_handler(interrupt_frame_t *regs)
                         break;
                     }
                     if (copy_to_user(buf + read, chunk, (size_t)n) < 0) {
-                        regs->eax = (uint32_t)-1;
+                        regs->eax = (uint32_t)-K_EFAULT;
                         break;
                     }
                     read += (uint32_t)n;
@@ -112,7 +143,11 @@ void syscall_handler(interrupt_frame_t *regs)
                     break;
                 }
 
-                buf[read++] = (char)c;
+                if (copy_to_user(buf + read, &c, 1) < 0) {
+                    regs->eax = (uint32_t)-K_EFAULT;
+                    break;
+                }
+                read++;
             }
 
             regs->eax = read;
@@ -131,22 +166,20 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_EXEC: {
             char path[TASK_IMAGE_PATH_BYTES];
 
-            if (copy_string_from_user(path, sizeof(path),
-                                      (const char *)regs->ebx) < 0 ||
-                task_exec_current(path, regs) < 0) {
-                regs->eax = (uint32_t)-1;
-            }
+            if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
+                regs->eax = (uint32_t)-K_EFAULT;
+            else if (task_exec_current(path, regs) < 0)
+                regs->eax = (uint32_t)-K_ENOENT;
             break;
         }
 
         case SYS_SPAWN: {
             char path[TASK_IMAGE_PATH_BYTES];
 
-            if (copy_string_from_user(path, sizeof(path),
-                                      (const char *)regs->ebx) < 0 ||
-                task_spawn_current(path, regs) < 0) {
-                regs->eax = (uint32_t)-1;
-            }
+            if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
+                regs->eax = (uint32_t)-K_EFAULT;
+            else if (task_spawn_current(path, regs) < 0)
+                regs->eax = (uint32_t)-K_ENOENT;
             break;
         }
 
@@ -175,7 +208,7 @@ void syscall_handler(interrupt_frame_t *regs)
             char path[256];
             if (copy_string_from_user(path, sizeof(path),
                                       (const char *)regs->ebx) < 0) {
-                regs->eax = (uint32_t)-1;
+                regs->eax = (uint32_t)-K_EFAULT;
             } else {
                 regs->eax = (uint32_t)fd_open(path, (int)regs->ecx);
             }
@@ -200,19 +233,48 @@ void syscall_handler(interrupt_frame_t *regs)
 
             if (name_size == 0 || name_size > sizeof(name) ||
                 !vmm_user_range_valid(user_name, name_size, true)) {
-                regs->eax = (uint32_t)-1;
+                regs->eax = (uint32_t)-K_EFAULT;
                 break;
             }
             result = fd_read_dir((int)regs->ebx, name, name_size);
             if (result > 0 && copy_to_user(user_name, name, kstrlen(name) + 1) < 0) {
-                result = -1;
+                result = -K_EFAULT;
+            }
+            regs->eax = (uint32_t)result;
+            break;
+        }
+
+        case SYS_FORK:
+            regs->eax = (uint32_t)task_fork_current(regs);
+            break;
+
+        case SYS_DUP:
+            regs->eax = (uint32_t)fd_dup((int)regs->ebx);
+            break;
+
+        case SYS_DUP2:
+            regs->eax = (uint32_t)fd_dup2((int)regs->ebx, (int)regs->ecx);
+            break;
+
+        case SYS_PIPE: {
+            int pair[2];
+            int result;
+            if (!vmm_user_range_valid((void *)regs->ebx, sizeof(pair), true)) {
+                regs->eax = (uint32_t)-K_EFAULT;
+                break;
+            }
+            result = fd_pipe(pair);
+            if (result == 0 && copy_to_user((void *)regs->ebx, pair, sizeof(pair)) < 0) {
+                fd_close(pair[0]);
+                fd_close(pair[1]);
+                result = -K_EFAULT;
             }
             regs->eax = (uint32_t)result;
             break;
         }
 
         default:
-            regs->eax = (uint32_t)-1;
+            regs->eax = (uint32_t)-K_ENOSYS;
             break;
     }
 }

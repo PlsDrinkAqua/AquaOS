@@ -11,6 +11,7 @@ YIELDTEST=./user/yieldtest
 FAULTTEST=./user/faulttest
 TASKTEST=./user/tasktest
 FDTEST=./user/fdtest
+UNIXTEST=./user/unixtest
 
 . ./config.sh
 make -C user
@@ -36,6 +37,7 @@ sudo cp "$YIELDTEST" "$MNT/yieldtest"
 sudo cp "$FAULTTEST" "$MNT/faulttest"
 sudo cp "$TASKTEST" "$MNT/tasktest"
 sudo cp "$FDTEST" "$MNT/fdtest"
+sudo cp "$UNIXTEST" "$MNT/unixtest"
 
 # 确保写入磁盘
 sync

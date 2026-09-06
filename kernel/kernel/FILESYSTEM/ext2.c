@@ -32,6 +32,29 @@ static uint8_t read_sb(void) {
     return 1;
 }
 
+static int write_sb(void) {
+    uint8_t buf[SECTOR_SIZE * SUPER_READ_SECS];
+    if (ata_read_sectors(SUPER_SECTOR, SUPER_READ_SECS, buf) != SUPER_READ_SECS) return -1;
+    kmemcpy(buf, &sb, sizeof(sb));
+    return ata_write_sectors(SUPER_SECTOR, SUPER_READ_SECS, buf) == SUPER_READ_SECS ? 0 : -1;
+}
+
+static int write_gbdt(void) {
+    uint32_t block_size = 1024U << sb.s_log_block_size;
+    uint32_t gd_block = block_size == 1024 ? 2 : 1;
+    uint32_t bytes = sb_groups_count * sizeof(*gbdt);
+    uint32_t sectors = (bytes + SECTOR_SIZE - 1) / SECTOR_SIZE;
+    uint8_t *buf = kmalloc(sectors * SECTOR_SIZE);
+    int result = -1;
+    if (!buf) return -1;
+    if (ata_read_sectors(gd_block * (block_size / SECTOR_SIZE), sectors, buf) == sectors) {
+        kmemcpy(buf, gbdt, bytes);
+        if (ata_write_sectors(gd_block * (block_size / SECTOR_SIZE), sectors, buf) == sectors) result = 0;
+    }
+    kfree(buf);
+    return result;
+}
+
 /**
  * 从磁盘读取一个 inode 的完整内容
  *
@@ -81,6 +104,101 @@ int ext2_read_inode(uint32_t inode_no, struct ext2_inode *inode_out)
     kmemcpy(inode_out, tmp + off_in_sec, INODE_SIZE);
     kfree(tmp);
     return 0;
+}
+
+int ext2_write_inode(uint32_t inode_no, const struct ext2_inode *inode) {
+    uint32_t inode_size, idx, group, index, block_size, byte_off, start_sec;
+    uint32_t off_in_sec, to_write;
+    uint8_t *tmp;
+    int result = -1;
+    if (!inode || inode_no == 0 || inode_no > sb.s_inodes_count) return -1;
+    inode_size = sb.s_rev_level >= 1 ? sb.s_inode_size : 128;
+    idx = inode_no - 1; group = idx / sb.s_inodes_per_group; index = idx % sb.s_inodes_per_group;
+    if (group >= sb_groups_count) return -1;
+    block_size = 1024U << sb.s_log_block_size;
+    byte_off = index * inode_size;
+    start_sec = (gbdt[group].bg_inode_table + byte_off / block_size) * (block_size / SECTOR_SIZE)
+                + (byte_off % block_size) / SECTOR_SIZE;
+    off_in_sec = byte_off % SECTOR_SIZE;
+    to_write = (off_in_sec + inode_size + SECTOR_SIZE - 1) / SECTOR_SIZE;
+    tmp = kmalloc(to_write * SECTOR_SIZE);
+    if (!tmp) return -1;
+    if (ata_read_sectors(start_sec, to_write, tmp) == to_write) {
+        kmemcpy(tmp + off_in_sec, inode, sizeof(*inode));
+        if (ata_write_sectors(start_sec, to_write, tmp) == to_write) result = 0;
+    }
+    kfree(tmp);
+    return result;
+}
+
+static int bitmap_allocate(uint32_t bitmap_block, uint32_t limit, uint32_t *bit_out) {
+    uint32_t block_size = 1024U << sb.s_log_block_size;
+    uint8_t *bitmap = kmalloc(block_size);
+    if (!bitmap) return -1;
+    if (ext2_read_block(bitmap_block, bitmap) < 0) { kfree(bitmap); return -1; }
+    for (uint32_t bit = 0; bit < limit; bit++) {
+        if (!(bitmap[bit / 8] & (1U << (bit % 8)))) {
+            bitmap[bit / 8] |= 1U << (bit % 8);
+            if (ext2_write_block(bitmap_block, bitmap) < 0) { kfree(bitmap); return -1; }
+            *bit_out = bit; kfree(bitmap); return 0;
+        }
+    }
+    kfree(bitmap); return -1;
+}
+
+int ext2_alloc_inode(uint32_t *inode_no) {
+    if (!inode_no) return -1;
+    for (uint32_t group = 0; group < sb_groups_count; group++) {
+        uint32_t bit, limit = sb.s_inodes_per_group;
+        if (!gbdt[group].bg_free_inodes_count) continue;
+        if ((group + 1) * limit > sb.s_inodes_count) limit = sb.s_inodes_count - group * limit;
+        if (bitmap_allocate(gbdt[group].bg_inode_bitmap, limit, &bit) == 0) {
+            *inode_no = group * sb.s_inodes_per_group + bit + 1;
+            gbdt[group].bg_free_inodes_count--; sb.s_free_inodes_count--;
+            return write_gbdt() < 0 || write_sb() < 0 ? -1 : 0;
+        }
+    }
+    return -1;
+}
+
+int ext2_alloc_block(uint32_t *block_no) {
+    uint32_t block_size = 1024U << sb.s_log_block_size;
+    uint8_t *zero;
+    if (!block_no) return -1;
+    for (uint32_t group = 0; group < sb_groups_count; group++) {
+        uint32_t bit, limit = sb.s_blocks_per_group;
+        uint32_t first = sb.s_first_data_block + group * sb.s_blocks_per_group;
+        if (!gbdt[group].bg_free_blocks_count) continue;
+        if (first + limit > sb.s_blocks_count) limit = sb.s_blocks_count - first;
+        if (bitmap_allocate(gbdt[group].bg_block_bitmap, limit, &bit) == 0) {
+            *block_no = first + bit;
+            gbdt[group].bg_free_blocks_count--; sb.s_free_blocks_count--;
+            if (write_gbdt() < 0 || write_sb() < 0) return -1;
+            zero = kmalloc(block_size);
+            if (!zero) return -1;
+            kmemset(zero, 0, block_size);
+            int result = ext2_write_block(*block_no, zero);
+            kfree(zero); return result;
+        }
+    }
+    return -1;
+}
+
+int ext2_free_block(uint32_t block_no) {
+    uint32_t block_size = 1024U << sb.s_log_block_size;
+    uint32_t group, bit;
+    uint8_t *bitmap;
+    if (block_no < sb.s_first_data_block || block_no >= sb.s_blocks_count) return -1;
+    group = (block_no - sb.s_first_data_block) / sb.s_blocks_per_group;
+    bit = (block_no - sb.s_first_data_block) % sb.s_blocks_per_group;
+    bitmap = kmalloc(block_size);
+    if (!bitmap) return -1;
+    if (ext2_read_block(gbdt[group].bg_block_bitmap, bitmap) < 0 ||
+        !(bitmap[bit / 8] & (1U << (bit % 8)))) { kfree(bitmap); return -1; }
+    bitmap[bit / 8] &= ~(1U << (bit % 8));
+    if (ext2_write_block(gbdt[group].bg_block_bitmap, bitmap) < 0) { kfree(bitmap); return -1; }
+    kfree(bitmap); gbdt[group].bg_free_blocks_count++; sb.s_free_blocks_count++;
+    return write_gbdt() < 0 || write_sb() < 0 ? -1 : 0;
 }
 
 
@@ -179,4 +297,9 @@ int ext2_read_block(uint32_t block_no, void *buf) {
     if (ata_read_sectors(start_sec, secs, buf) != secs)
         return -1;
     return 0;
+}
+
+int ext2_write_block(uint32_t block_no, const void *buf) {
+    uint32_t secs = ext2_sectors_per_block();
+    return ata_write_sectors(block_no * secs, secs, buf) == secs ? 0 : -1;
 }

@@ -5,6 +5,7 @@
 #include <libk/string.h>
 
 #include <kernel/elf.h>
+#include <kernel/errno.h>
 #include <kernel/kha.h>
 #include <kernel/pmm.h>
 #include <kernel/task.h>
@@ -98,6 +99,7 @@ static void task_clear_wait_state(task_t *task) {
     task->keyboard_read_count = 0;
     task->waiting_for_keyboard = 0;
     task->wait_status_delivered = 0;
+    task->waiting_pipe = NULL;
 }
 
 static task_t *task_find_by_pid(uint32_t pid) {
@@ -379,9 +381,6 @@ int task_exec_current(const char *path, interrupt_frame_t *regs) {
     if (old_pd) {
         vmm_destroy_address_space(old_pd);
     }
-    fd_table_close_all(current_task);
-    fd_table_init(current_task);
-
     regs->eip = current_task->entry;
     regs->useresp = current_task->user_stack_top;
     regs->eax = 0;
@@ -437,6 +436,41 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     return 0;
 }
 
+int task_fork_current(interrupt_frame_t *regs) {
+    task_t *parent = current_task;
+    task_t *child;
+
+    if (!parent || !regs || !parent->address_space) return -K_EINVAL;
+    child = task_alloc();
+    if (!child) return -K_EAGAIN;
+    if (task_alloc_kernel_stack(child) < 0) goto fail;
+
+    child->address_space = vmm_clone_address_space(parent->address_space);
+    if (!child->address_space) goto fail;
+    child->parent_pid = parent->pid;
+    child->entry = parent->entry;
+    child->user_stack_top = parent->user_stack_top;
+    child->heap_start = parent->heap_start;
+    child->heap_brk = parent->heap_brk;
+    child->heap_limit = parent->heap_limit;
+    child->exit_status = 0;
+    task_copy_path(child->image_path, sizeof(child->image_path), parent->image_path);
+    if (fd_table_clone(child, parent) < 0) goto fail;
+
+    child->saved_regs = *regs;
+    child->saved_regs.eax = 0;
+    child->state = TASK_READY;
+    regs->eax = child->pid;
+    return (int)child->pid;
+
+fail:
+    fd_table_close_all(child);
+    if (child->address_space) vmm_destroy_address_space(child->address_space);
+    task_free_kernel_stack(child);
+    kmemset(child, 0, sizeof(*child));
+    return -K_ENOMEM;
+}
+
 void task_yield_current(interrupt_frame_t *regs) {
     int switched = task_schedule(regs);
     if (switched <= 0 && regs) {
@@ -477,7 +511,7 @@ int task_complete_keyboard_read(char c) {
 
             vmm_switch_address_space(task->address_space);
             if (copy_to_user((void *)task->keyboard_read_buf, &c, 1) < 0) {
-                task->saved_regs.eax = (uint32_t)-1;
+                task->saved_regs.eax = (uint32_t)-K_EFAULT;
             } else {
                 task->saved_regs.eax = 1;
             }
@@ -492,6 +526,26 @@ int task_complete_keyboard_read(char c) {
     }
 
     return 0;
+}
+
+int task_block_current_for_pipe(interrupt_frame_t *regs, void *pipe) {
+    if (!current_task || !regs || !pipe) return -1;
+    current_task->saved_regs = *regs;
+    /* int $0x80 is two bytes; retry the syscall after the pipe changes. */
+    current_task->saved_regs.eip -= 2;
+    current_task->waiting_pipe = pipe;
+    current_task->state = TASK_BLOCKED;
+    return task_schedule(regs) < 0 ? -1 : 0;
+}
+
+void task_wake_pipe(void *pipe) {
+    if (!pipe) return;
+    for (uint32_t i = 0; i < TASK_MAX; i++) {
+        if (task_table[i].state == TASK_BLOCKED && task_table[i].waiting_pipe == pipe) {
+            task_table[i].waiting_pipe = NULL;
+            task_table[i].state = TASK_READY;
+        }
+    }
 }
 
 void task_sleep_current(uint32_t sleep_ticks, interrupt_frame_t *regs) {
@@ -512,7 +566,7 @@ void task_sleep_current(uint32_t sleep_ticks, interrupt_frame_t *regs) {
     if (task_schedule(regs) < 0) {
         current_task->wake_tick = 0;
         current_task->state = TASK_RUNNING;
-        regs->eax = (uint32_t)-1;
+        regs->eax = (uint32_t)-K_EAGAIN;
     }
 }
 
@@ -534,14 +588,14 @@ void task_wait_current(uint32_t pid, interrupt_frame_t *regs) {
 
     if (!current_task || !regs || pid == 0) {
         if (regs) {
-            regs->eax = (uint32_t)-1;
+            regs->eax = (uint32_t)-K_ECHILD;
         }
         return;
     }
 
     child = task_find_by_pid(pid);
     if (!child || child->parent_pid != current_task->pid) {
-        regs->eax = (uint32_t)-1;
+        regs->eax = (uint32_t)-K_ECHILD;
         return;
     }
 
@@ -562,7 +616,7 @@ void task_wait_current(uint32_t pid, interrupt_frame_t *regs) {
     if (task_schedule(regs) < 0) {
         current_task->waiting_for_pid = 0;
         current_task->state = TASK_RUNNING;
-        regs->eax = (uint32_t)-1;
+        regs->eax = (uint32_t)-K_EAGAIN;
     }
 }
 
@@ -611,6 +665,7 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
     exiting->keyboard_read_buf = 0;
     exiting->keyboard_read_count = 0;
     exiting->waiting_for_keyboard = 0;
+    exiting->waiting_pipe = NULL;
 
     /* Keep descendants owned by init so their task slots can be reclaimed. */
     if (exiting != &task_table[0]) {

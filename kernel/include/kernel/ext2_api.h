@@ -37,10 +37,11 @@ enum ext2_file_type {
 
 int ext2_init(void);
 void ext2_selftest(void);
-int ext2_file_open(const char *path, ext2_file_t *file);
+int ext2_file_open(const char *path, int flags, ext2_file_t *file);
 size_t ext2_file_size(const ext2_file_t *file);
 int ext2_file_is_dir(const ext2_file_t *file);
 int ext2_file_read(ext2_file_t *file, void *buf, size_t count);
+int ext2_file_write(ext2_file_t *file, const void *buf, size_t count, int append);
 int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence);
 int ext2_file_read_dir(ext2_file_t *file, char *name, size_t name_size);
 

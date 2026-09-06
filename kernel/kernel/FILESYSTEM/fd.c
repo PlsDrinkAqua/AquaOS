@@ -1,8 +1,80 @@
 #include <libk/string.h>
-
+#include <kernel/errno.h>
 #include <kernel/fd.h>
 #include <kernel/task.h>
 #include <kernel/tty.h>
+
+#define OPEN_FILE_MAX 64
+#define PIPE_MAX 16
+#define PIPE_CAPACITY 512
+#define O_ACCMODE 3
+#define O_WRONLY 1
+#define O_APPEND 0x400
+
+typedef struct pipe_object {
+    uint8_t used;
+    uint16_t readers, writers;
+    size_t head, count;
+    char data[PIPE_CAPACITY];
+} pipe_object_t;
+
+struct open_file {
+    uint8_t used;
+    uint16_t refs;
+    fd_type_t type;
+    int flags;
+    union { ext2_file_t ext2; pipe_object_t *pipe; } object;
+};
+
+static open_file_t open_files[OPEN_FILE_MAX];
+static pipe_object_t pipes[PIPE_MAX];
+
+static open_file_t *open_file_alloc(fd_type_t type) {
+    for (int i = 0; i < OPEN_FILE_MAX; i++) if (!open_files[i].used) {
+        kmemset(&open_files[i], 0, sizeof(open_files[i]));
+        open_files[i].used = 1;
+        open_files[i].refs = 1;
+        open_files[i].type = type;
+        return &open_files[i];
+    }
+    return NULL;
+}
+
+static pipe_object_t *pipe_alloc(void) {
+    for (int i = 0; i < PIPE_MAX; i++) if (!pipes[i].used) {
+        kmemset(&pipes[i], 0, sizeof(pipes[i]));
+        pipes[i].used = 1;
+        return &pipes[i];
+    }
+    return NULL;
+}
+
+static void open_file_put(open_file_t *file) {
+    pipe_object_t *pipe;
+    if (!file || !file->used || file->refs == 0 || --file->refs != 0) return;
+    if (file->type == FD_PIPE_READ || file->type == FD_PIPE_WRITE) {
+        pipe = file->object.pipe;
+        if (pipe && pipe->used) {
+            if (file->type == FD_PIPE_READ && pipe->readers) pipe->readers--;
+            if (file->type == FD_PIPE_WRITE && pipe->writers) pipe->writers--;
+            task_wake_pipe(pipe);
+            if (!pipe->readers && !pipe->writers) kmemset(pipe, 0, sizeof(*pipe));
+        }
+    }
+    kmemset(file, 0, sizeof(*file));
+}
+
+static fd_entry_t *fd_get(int fd) {
+    task_t *task = task_current();
+    if (!task || fd < 0 || fd >= TASK_FD_MAX || task->fds[fd].type == FD_NONE) return NULL;
+    return &task->fds[fd];
+}
+
+static int fd_find_free(task_t *task, int start) {
+    for (int fd = start; fd < TASK_FD_MAX; fd++)
+        if (task->fds[fd].type == FD_NONE) return fd;
+    return -1;
+}
 
 void fd_table_init(struct task *task) {
     if (!task) return;
@@ -12,85 +84,173 @@ void fd_table_init(struct task *task) {
     task->fds[2].type = FD_STDERR;
 }
 
+int fd_table_clone(struct task *dest, const struct task *source) {
+    if (!dest || !source) return -K_EINVAL;
+    kmemcpy(dest->fds, source->fds, sizeof(dest->fds));
+    for (int fd = 0; fd < TASK_FD_MAX; fd++)
+        if (dest->fds[fd].open) dest->fds[fd].open->refs++;
+    return 0;
+}
+
 void fd_table_close_all(struct task *task) {
     if (!task) return;
-    kmemset(task->fds, 0, sizeof(task->fds));
-}
-
-static fd_entry_t *fd_get(int fd) {
-    task_t *task = task_current();
-    if (!task || fd < 0 || fd >= TASK_FD_MAX || task->fds[fd].type == FD_NONE) {
-        return NULL;
+    for (int fd = 0; fd < TASK_FD_MAX; fd++) {
+        open_file_put(task->fds[fd].open);
+        kmemset(&task->fds[fd], 0, sizeof(task->fds[fd]));
     }
-    return &task->fds[fd];
 }
 
-fd_type_t fd_type(int fd) {
-    fd_entry_t *entry = fd_get(fd);
-    return entry ? entry->type : FD_NONE;
+fd_type_t fd_type(int fd) { fd_entry_t *e = fd_get(fd); return e ? e->type : FD_NONE; }
+
+void *fd_wait_object(int fd) {
+    fd_entry_t *e = fd_get(fd);
+    if (!e || !e->open || (e->type != FD_PIPE_READ && e->type != FD_PIPE_WRITE)) return NULL;
+    return e->open->object.pipe;
 }
 
 int fd_open(const char *path, int flags) {
     task_t *task = task_current();
-    int fd;
-
-    if (!task || !path || flags != 0) return -1;
-    for (fd = 3; fd < TASK_FD_MAX; fd++) {
-        if (task->fds[fd].type == FD_NONE) break;
-    }
-    if (fd == TASK_FD_MAX) return -1;
+    open_file_t *file;
+    int fd, result;
+    if (!task || !path || (flags & O_ACCMODE) == O_ACCMODE) return -K_EINVAL;
+    fd = fd_find_free(task, 3);
+    if (fd < 0) return -K_EMFILE;
+    file = open_file_alloc(FD_EXT2);
+    if (!file) return -K_ENFILE;
+    file->flags = flags;
     task_preemption_disable();
-    int result = ext2_file_open(path, &task->fds[fd].file);
+    result = ext2_file_open(path, flags, &file->object.ext2);
     task_preemption_enable();
-    if (result < 0) {
-        return -1;
-    }
+    if (result < 0) { open_file_put(file); return result; }
     task->fds[fd].type = FD_EXT2;
+    task->fds[fd].open = file;
     return fd;
 }
 
 int fd_close(int fd) {
-    fd_entry_t *entry = fd_get(fd);
-    if (!entry || fd < 3) return -1;
-    kmemset(entry, 0, sizeof(*entry));
+    fd_entry_t *e = fd_get(fd);
+    if (!e) return -K_EBADF;
+    open_file_put(e->open);
+    kmemset(e, 0, sizeof(*e));
+    return 0;
+}
+
+int fd_dup(int oldfd) {
+    task_t *task = task_current();
+    fd_entry_t *source = fd_get(oldfd);
+    int newfd;
+    if (!source) return -K_EBADF;
+    newfd = fd_find_free(task, 0);
+    if (newfd < 0) return -K_EMFILE;
+    task->fds[newfd] = *source;
+    if (source->open) source->open->refs++;
+    return newfd;
+}
+
+int fd_dup2(int oldfd, int newfd) {
+    task_t *task = task_current();
+    fd_entry_t *source = fd_get(oldfd);
+    if (!source || newfd < 0 || newfd >= TASK_FD_MAX) return -K_EBADF;
+    if (oldfd == newfd) return newfd;
+    if (task->fds[newfd].type != FD_NONE) fd_close(newfd);
+    task->fds[newfd] = *source;
+    if (source->open) source->open->refs++;
+    return newfd;
+}
+
+int fd_pipe(int pipefd[2]) {
+    task_t *task = task_current();
+    pipe_object_t *pipe;
+    open_file_t *reader, *writer;
+    int rfd, wfd;
+    if (!task || !pipefd) return -K_EINVAL;
+    rfd = fd_find_free(task, 0);
+    if (rfd < 0) return -K_EMFILE;
+    task->fds[rfd].type = FD_STDERR;
+    wfd = fd_find_free(task, 0);
+    task->fds[rfd].type = FD_NONE;
+    if (wfd < 0) return -K_EMFILE;
+    pipe = pipe_alloc(); reader = open_file_alloc(FD_PIPE_READ); writer = open_file_alloc(FD_PIPE_WRITE);
+    if (!pipe || !reader || !writer) {
+        if (reader) open_file_put(reader);
+        if (writer) open_file_put(writer);
+        if (pipe) kmemset(pipe, 0, sizeof(*pipe));
+        return -K_ENFILE;
+    }
+    pipe->readers = pipe->writers = 1;
+    reader->object.pipe = writer->object.pipe = pipe;
+    task->fds[rfd].type = FD_PIPE_READ; task->fds[rfd].open = reader;
+    task->fds[wfd].type = FD_PIPE_WRITE; task->fds[wfd].open = writer;
+    pipefd[0] = rfd; pipefd[1] = wfd;
     return 0;
 }
 
 int fd_read(int fd, void *buf, size_t count) {
-    fd_entry_t *entry = fd_get(fd);
-    if (!entry || entry->type != FD_EXT2) return -1;
+    fd_entry_t *e = fd_get(fd);
+    int result = 0;
+    if (!e) return -K_EBADF;
+    if (e->type == FD_PIPE_READ) {
+        pipe_object_t *pipe = e->open->object.pipe;
+        if (!buf && count) return -K_EFAULT;
+        if (!count) return 0;
+        if (!pipe->count) return pipe->writers ? -K_EAGAIN : 0;
+        while ((size_t)result < count && pipe->count) {
+            ((char *)buf)[result++] = pipe->data[pipe->head];
+            pipe->head = (pipe->head + 1) % PIPE_CAPACITY; pipe->count--;
+        }
+        task_wake_pipe(pipe);
+        return result;
+    }
+    if (e->type != FD_EXT2 || !e->open || (e->open->flags & O_ACCMODE) == O_WRONLY) return -K_EBADF;
     task_preemption_disable();
-    int result = ext2_file_read(&entry->file, buf, count);
+    result = ext2_file_read(&e->open->object.ext2, buf, count);
     task_preemption_enable();
     return result;
 }
 
 int fd_write(int fd, const void *buf, size_t count) {
-    fd_entry_t *entry = fd_get(fd);
-    const char *bytes = buf;
-
-    if (!entry || (entry->type != FD_STDOUT && entry->type != FD_STDERR) ||
-        (!buf && count)) return -1;
+    fd_entry_t *e = fd_get(fd);
+    int result = 0;
+    if (!e) return -K_EBADF;
+    if (e->type == FD_STDOUT || e->type == FD_STDERR) {
+        if (!buf && count) return -K_EFAULT;
+        task_preemption_disable();
+        for (size_t i = 0; i < count; i++) terminal_putchar(((const char *)buf)[i]);
+        task_preemption_enable();
+        return (int)count;
+    }
+    if (e->type == FD_PIPE_WRITE) {
+        pipe_object_t *pipe = e->open->object.pipe;
+        if (!buf && count) return -K_EFAULT;
+        if (!pipe->readers) return -K_EPIPE;
+        if (!count) return 0;
+        if (pipe->count == PIPE_CAPACITY) return -K_EAGAIN;
+        while ((size_t)result < count && pipe->count < PIPE_CAPACITY) {
+            size_t tail = (pipe->head + pipe->count) % PIPE_CAPACITY;
+            pipe->data[tail] = ((const char *)buf)[result++]; pipe->count++;
+        }
+        task_wake_pipe(pipe);
+        return result;
+    }
+    if (e->type != FD_EXT2 || !e->open || (e->open->flags & O_ACCMODE) == 0) return -K_EBADF;
     task_preemption_disable();
-    for (size_t i = 0; i < count; i++) terminal_putchar(bytes[i]);
-    task_preemption_enable();
-    return (int)count;
-}
-
-int fd_seek(int fd, int32_t offset, int whence) {
-    fd_entry_t *entry = fd_get(fd);
-    if (!entry || entry->type != FD_EXT2) return -1;
-    task_preemption_disable();
-    int result = ext2_file_seek(&entry->file, offset, whence);
+    result = ext2_file_write(&e->open->object.ext2, buf, count,
+                             (e->open->flags & O_APPEND) != 0);
     task_preemption_enable();
     return result;
 }
 
-int fd_read_dir(int fd, char *name, size_t name_size) {
-    fd_entry_t *entry = fd_get(fd);
-    if (!entry || entry->type != FD_EXT2) return -1;
-    task_preemption_disable();
-    int result = ext2_file_read_dir(&entry->file, name, name_size);
-    task_preemption_enable();
+int fd_seek(int fd, int32_t offset, int whence) {
+    fd_entry_t *e = fd_get(fd); int result;
+    if (!e) return -K_EBADF;
+    if (e->type != FD_EXT2 || !e->open) return -K_ESPIPE;
+    task_preemption_disable(); result = ext2_file_seek(&e->open->object.ext2, offset, whence); task_preemption_enable();
+    return result;
+}
+
+int fd_read_dir(int fd, char *name, size_t size) {
+    fd_entry_t *e = fd_get(fd); int result;
+    if (!e || e->type != FD_EXT2 || !e->open) return -K_EBADF;
+    task_preemption_disable(); result = ext2_file_read_dir(&e->open->object.ext2, name, size); task_preemption_enable();
     return result;
 }

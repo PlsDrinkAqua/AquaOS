@@ -19,6 +19,10 @@ enum {
     SYS_CLOSE   = 14,
     SYS_LSEEK   = 15,
     SYS_READDIR = 16,
+    SYS_FORK    = 17,
+    SYS_DUP     = 18,
+    SYS_DUP2    = 19,
+    SYS_PIPE    = 20,
 };
 
 #ifdef __cplusplus

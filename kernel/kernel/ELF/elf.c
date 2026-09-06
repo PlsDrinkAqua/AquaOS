@@ -325,7 +325,7 @@ int elf_load_from_file(const char *path, elf_load_result_t *out) {
 
     if (!path || !out) return -1;
 
-    if (ext2_file_open(path, &file) < 0) {
+    if (ext2_file_open(path, 0, &file) < 0) {
         kprintf("ELF: open(\"%s\") failed\n", path);
         return -1;
     }
@@ -362,7 +362,7 @@ int elf_load_from_file_into_address_space(const char *path,
 
     if (!path || !pd || !out) return -1;
 
-    if (ext2_file_open(path, &file) < 0) {
+    if (ext2_file_open(path, 0, &file) < 0) {
         kprintf("ELF: open(\"%s\") failed\n", path);
         return -1;
     }
