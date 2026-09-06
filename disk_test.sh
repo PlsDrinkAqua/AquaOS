@@ -8,6 +8,8 @@ HELLO=./user/hello
 MEMTEST=./user/memtest
 SLEEPTEST=./user/sleeptest
 YIELDTEST=./user/yieldtest
+FAULTTEST=./user/faulttest
+TASKTEST=./user/tasktest
 
 . ./config.sh
 make -C user
@@ -30,6 +32,8 @@ sudo cp "$HELLO" "$MNT/hello"
 sudo cp "$MEMTEST" "$MNT/memtest"
 sudo cp "$SLEEPTEST" "$MNT/sleeptest"
 sudo cp "$YIELDTEST" "$MNT/yieldtest"
+sudo cp "$FAULTTEST" "$MNT/faulttest"
+sudo cp "$TASKTEST" "$MNT/tasktest"
 
 # 确保写入磁盘
 sync

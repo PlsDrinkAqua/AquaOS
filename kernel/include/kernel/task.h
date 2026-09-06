@@ -38,6 +38,7 @@ typedef struct {
     uint32_t keyboard_read_count;
     uint8_t waiting_for_keyboard;
     uint8_t wait_status_delivered;
+    uint8_t detached;
     interrupt_frame_t saved_regs;
     int exit_status;
 } task_t;

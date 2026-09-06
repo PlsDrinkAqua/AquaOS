@@ -30,6 +30,8 @@ static inline void idt_flush(void)
 }
 extern void _irq0(void);
 extern void _irq1(void);
+extern void _isr0(void);
+extern void _isr13(void);
 extern void _isr14(void);
 extern void isr128(void);
 // extern void _irq14(void);
@@ -68,7 +70,9 @@ void idt_install(void)
     // idt_set_gate(ATA_IRQ_SECOND, (uint32_t)_irq15, 0x08, 0x8E);
     /* Load the new IDT */
 
-        /* 注册 Page Fault（Exception Vector 14） */
+    /* Faults needed for basic userspace process isolation. */
+    idt_set_gate(0x00, (uint32_t)_isr0,  0x08, 0x8E);
+    idt_set_gate(0x0D, (uint32_t)_isr13, 0x08, 0x8E);
     idt_set_gate(
         0x0E,             // 向量号 14
         (uint32_t)_isr14, // 汇编入口

@@ -10,6 +10,7 @@
 #include <kernel/task.h>
 #include <kernel/timer.h>
 #include <kernel/tss.h>
+#include <kernel/usercopy.h>
 #include <kernel/user_heap.h>
 #include <kernel/vmm.h>
 
@@ -22,6 +23,7 @@
 static task_t task_table[TASK_MAX];
 static task_t *current_task;
 static uint32_t next_pid = 1;
+static uint32_t preempt_disable_depth;
 
 extern page_directory_t boot_page_directory;
 
@@ -54,6 +56,18 @@ static uint32_t kernel_vaddr_to_paddr(uint32_t vaddr) {
     return 0;
 }
 
+static void task_preempt_disable(void) {
+    preempt_disable_depth++;
+    __asm__ volatile ("" ::: "memory");
+}
+
+static void task_preempt_enable(void) {
+    __asm__ volatile ("" ::: "memory");
+    if (preempt_disable_depth > 0) {
+        preempt_disable_depth--;
+    }
+}
+
 static void task_copy_path(char *dest, size_t dest_size, const char *path) {
     size_t i = 0;
 
@@ -73,12 +87,17 @@ static void task_copy_path(char *dest, size_t dest_size, const char *path) {
     dest[i] = '\0';
 }
 
-static void task_set_image_path(task_t *task, const char *path) {
+static void task_clear_wait_state(task_t *task) {
     if (!task) {
         return;
     }
 
-    task_copy_path(task->image_path, sizeof(task->image_path), path);
+    task->waiting_for_pid = 0;
+    task->wake_tick = 0;
+    task->keyboard_read_buf = 0;
+    task->keyboard_read_count = 0;
+    task->waiting_for_keyboard = 0;
+    task->wait_status_delivered = 0;
 }
 
 static task_t *task_find_by_pid(uint32_t pid) {
@@ -119,6 +138,9 @@ static task_t *task_alloc(void) {
         if (task_table[i].state == TASK_UNUSED) {
             kmemset(&task_table[i], 0, sizeof(task_table[i]));
             task_table[i].pid = next_pid++;
+            if (next_pid == 0) {
+                next_pid = 1;
+            }
             task_table[i].state = TASK_UNUSED;
             task_table[i].user_stack_top = USER_STACK_TOP;
             return &task_table[i];
@@ -214,6 +236,11 @@ static int task_prepare_user_stack(task_t *task) {
         }
     }
 
+    if (!vmm_user_range_valid((void *)stack_page, PAGE_SIZE, true)) {
+        kprintf("task: stack mapping is not writable at 0x%x\n", stack_page);
+        return -1;
+    }
+
     kmemset((void *)stack_page, 0, PAGE_SIZE);
     task->user_stack_top = USER_STACK_TOP;
     return 0;
@@ -228,10 +255,11 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
         return -1;
     }
 
-    task_set_image_path(task, path);
-    kmemcpy(image_path, task->image_path, sizeof(image_path));
+    task_copy_path(image_path, sizeof(image_path), path);
 
+    task_preempt_disable();
     if (elf_load_from_file_into_address_space(image_path, pd, &res) < 0) {
+        task_preempt_enable();
         return -1;
     }
 
@@ -239,9 +267,11 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
     vmm_switch_address_space(pd);
     if (task_prepare_user_stack(task) < 0) {
         vmm_switch_address_space(old_pd);
+        task_preempt_enable();
         return -1;
     }
     vmm_switch_address_space(old_pd);
+    task_preempt_enable();
 
     task->entry = res.entry;
     task->heap_start = res.heap_start;
@@ -249,6 +279,7 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
     task->heap_limit = USER_HEAP_LIMIT;
     task->state = TASK_READY;
     task->exit_status = 0;
+    task_clear_wait_state(task);
     kmemcpy(task->image_path, image_path, sizeof(task->image_path));
     return 0;
 }
@@ -286,6 +317,7 @@ void tasking_init(void) {
     task_table[0].state = TASK_UNUSED;
     task_table[0].user_stack_top = USER_STACK_TOP;
     current_task = &task_table[0];
+    preempt_disable_depth = 0;
 }
 
 task_t *task_current(void) {
@@ -409,7 +441,8 @@ void task_yield_current(interrupt_frame_t *regs) {
 }
 
 void task_preempt_current(interrupt_frame_t *regs) {
-    if (!current_task || current_task->state != TASK_RUNNING) {
+    if (preempt_disable_depth != 0 ||
+        !current_task || current_task->state != TASK_RUNNING) {
         return;
     }
 
@@ -439,13 +472,16 @@ int task_complete_keyboard_read(char c) {
             page_directory_t *old_pd = vmm_current_address_space();
 
             vmm_switch_address_space(task->address_space);
-            *((char *)task->keyboard_read_buf) = c;
+            if (copy_to_user((void *)task->keyboard_read_buf, &c, 1) < 0) {
+                task->saved_regs.eax = (uint32_t)-1;
+            } else {
+                task->saved_regs.eax = 1;
+            }
             vmm_switch_address_space(old_pd);
 
             task->keyboard_read_buf = 0;
             task->keyboard_read_count = 0;
             task->waiting_for_keyboard = 0;
-            task->saved_regs.eax = 1;
             task->state = TASK_READY;
             return 1;
         }
@@ -480,7 +516,8 @@ void task_wake_sleepers(uint32_t now) {
     for (uint32_t i = 0; i < TASK_MAX; i++) {
         task_t *task = &task_table[i];
 
-        if (task->state == TASK_SLEEPING && task->wake_tick <= now) {
+        if (task->state == TASK_SLEEPING &&
+            (int32_t)(now - task->wake_tick) >= 0) {
             task->wake_tick = 0;
             task->state = TASK_READY;
         }
@@ -564,6 +601,25 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
     exiting = current_task;
     exiting->state = TASK_EXITED;
     exiting->exit_status = status;
+    exiting->waiting_for_pid = 0;
+    exiting->wake_tick = 0;
+    exiting->keyboard_read_buf = 0;
+    exiting->keyboard_read_count = 0;
+    exiting->waiting_for_keyboard = 0;
+
+    /* Keep descendants owned by init so their task slots can be reclaimed. */
+    if (exiting != &task_table[0]) {
+        for (uint32_t i = 1; i < TASK_MAX; i++) {
+            if (task_table[i].state != TASK_UNUSED &&
+                task_table[i].parent_pid == exiting->pid) {
+                task_table[i].parent_pid = task_table[0].pid;
+                task_table[i].detached = 1;
+                if (task_table[i].state == TASK_EXITED) {
+                    task_table[i].wait_status_delivered = 1;
+                }
+            }
+        }
+    }
 
     kprintf("\ntask: pid=%u exited from %s with status %d\n",
             exiting->pid,
@@ -579,6 +635,10 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
             parent->state = TASK_READY;
             exiting->wait_status_delivered = 1;
             parent_woken = true;
+        }
+
+        if (exiting->detached) {
+            exiting->wait_status_delivered = 1;
         }
 
         if (task_schedule(regs) < 0) {

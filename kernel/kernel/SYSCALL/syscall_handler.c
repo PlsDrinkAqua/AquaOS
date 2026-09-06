@@ -5,7 +5,9 @@
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
 #include <kernel/task.h>
+#include <kernel/usercopy.h>
 #include <kernel/user_heap.h>
+#include <kernel/vmm.h>
 
 enum {
     SYS_PUTCHAR = 0,
@@ -42,6 +44,11 @@ void syscall_handler(interrupt_frame_t *regs)
             const char *buf = (const char *)regs->ecx;
             uint32_t count = regs->edx;
 
+            if (!vmm_user_range_valid(buf, count, false)) {
+                regs->eax = (uint32_t)-1;
+                break;
+            }
+
             for (uint32_t i = 0; i < count; i++) {
                 terminal_putchar(buf[i]);
             }
@@ -63,6 +70,16 @@ void syscall_handler(interrupt_frame_t *regs)
             char *buf = (char *)regs->ecx;
             uint32_t count = regs->edx;
             uint32_t read = 0;
+
+            if (count == 0) {
+                regs->eax = 0;
+                break;
+            }
+
+            if (!vmm_user_range_valid(buf, count, true)) {
+                regs->eax = (uint32_t)-1;
+                break;
+            }
 
             while (read < count) {
                 int c = keyboard_getchar();
@@ -91,16 +108,22 @@ void syscall_handler(interrupt_frame_t *regs)
             break;
 
         case SYS_EXEC: {
-            const char *path = (const char *)regs->ebx;
-            if (task_exec_current(path, regs) < 0) {
+            char path[TASK_IMAGE_PATH_BYTES];
+
+            if (copy_string_from_user(path, sizeof(path),
+                                      (const char *)regs->ebx) < 0 ||
+                task_exec_current(path, regs) < 0) {
                 regs->eax = (uint32_t)-1;
             }
             break;
         }
 
         case SYS_SPAWN: {
-            const char *path = (const char *)regs->ebx;
-            if (task_spawn_current(path, regs) < 0) {
+            char path[TASK_IMAGE_PATH_BYTES];
+
+            if (copy_string_from_user(path, sizeof(path),
+                                      (const char *)regs->ebx) < 0 ||
+                task_spawn_current(path, regs) < 0) {
                 regs->eax = (uint32_t)-1;
             }
             break;

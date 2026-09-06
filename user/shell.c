@@ -23,7 +23,7 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, taskinfo");
+        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, taskinfo");
         return;
     }
 
@@ -82,6 +82,27 @@ static void run_command(const char *line) {
         return;
     }
 
+    if (strcmp(line, "faulttest") == 0) {
+        int pid = spawn("/faulttest");
+        if (pid < 0) {
+            printf("spawn failed: /faulttest\n");
+        } else {
+            int status = wait(pid);
+            printf("faulttest exited with status %d (expected 142)\n", status);
+        }
+        return;
+    }
+
+    if (strcmp(line, "tasktest") == 0) {
+        int pid = spawn("/tasktest");
+        if (pid < 0) {
+            printf("spawn failed: /tasktest\n");
+        } else {
+            printf("tasktest exited with status %d\n", wait(pid));
+        }
+        return;
+    }
+
     if (strncmp(line, "echo ", 5) == 0) {
         puts(line + 5);
         return;
@@ -93,10 +114,10 @@ static void run_command(const char *line) {
 void _start(void) {
     char line[LINE_MAX];
 
-    printf("AquaOS shell at %x\n", 0x08048000);
+    printf("ZenOS shell at %x\n", 0x08048000);
 
     for (;;) {
-        write_str("AquaOS> ");
+        write_str("ZenOS> ");
         zenos_readline(line, sizeof(line));
         run_command(line);
     }

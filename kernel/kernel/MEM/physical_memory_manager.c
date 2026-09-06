@@ -6,11 +6,11 @@
 
 #define ADDR_OFFSET 0xC0000000U
 
-// 4 GiB 物理空间，按 4 KiB 一页管理
+// Physical memory covered by the kernel's bootstrap direct map.
 #define PAGE_SIZE       0x1000U                          // 4 KiB
-#define MAX_PHYS_MEM    (4ULL * 1024 * 1024 * 1024)       // 4 GiB
-#define MAX_FRAMES      (MAX_PHYS_MEM / PAGE_SIZE)        // 1 048 576
-#define BITMAP_BYTES    (MAX_FRAMES / 8)                  // 131 072
+#define MAX_PHYS_MEM    (64U * 1024U * 1024U)
+#define MAX_FRAMES      (MAX_PHYS_MEM / PAGE_SIZE)
+#define BITMAP_BYTES    (MAX_FRAMES / 8)
 
 // 把 physaddr 向下对齐到 PAGE_SIZE 的边界
 #define ALIGN_DOWN(a, sz)   ((a) & ~((sz) - 1))
@@ -55,7 +55,13 @@ void pmm_init(multiboot_info_t* mbd, uint32_t magic)
 
         if(map->type == MULTIBOOT_MEMORY_AVAILABLE) {
             uint32_t start = (base + PAGE_SIZE - 1) / PAGE_SIZE;
-            uint32_t end   = (base + len) / PAGE_SIZE;
+            uint64_t region_end = (uint64_t)base + len;
+            uint32_t end = region_end > MAX_PHYS_MEM
+                         ? MAX_FRAMES
+                         : (uint32_t)(region_end / PAGE_SIZE);
+            if (start > MAX_FRAMES) {
+                start = MAX_FRAMES;
+            }
             for(uint32_t f = start; f < end; f++) {
                 bitmap_clear(f);
             }

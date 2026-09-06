@@ -29,28 +29,53 @@ _irq1:
 ;     pushl $0       # Dummy error code
 ;     pushl $0x2F    # Interrupt vector 47 (IRQ15 remapped to 0x28+7)
 ;     jmp irq_common_stub
+.global _isr0
+.align 4
+_isr0:
+    pushl $0
+    pushl $0
+    jmp exception_common_stub
+
+.global _isr13
+.align 4
+_isr13:
+    pushl $13
+    jmp exception_common_stub
+
 .global _isr14
-.align   4
+.align 4
 _isr14:
-    cli
-    pushl   %ebp
-    movl    %esp, %ebp
+    pushl $14
+    jmp exception_common_stub
 
-    /* push the error code (at 8(%ebp)) */
-    pushl   8(%ebp)
+.align 4
+exception_common_stub:
+    pushal
+    cld
 
-    /* save all general-purpose registers */
-    pusha
+    movw %ds, %ax
+    pushl %eax
 
-    /* call the C handler */
-    call    page_fault_handler
+    movw $0x10, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
 
-    /* restore registers and drop the error code */
-    popa
-    addl    $4, %esp
+    movl %esp, %eax
+    addl $4, %eax
+    pushl %eax
+    call exception_handler
+    addl $4, %esp
 
-    leave
-    sti
+    popl %eax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+
+    popal
+    addl $8, %esp
     iret
 
     

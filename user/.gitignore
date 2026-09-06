@@ -7,3 +7,5 @@
 /sleeptest
 /userprog
 /yieldtest
+/faulttest
+/tasktest

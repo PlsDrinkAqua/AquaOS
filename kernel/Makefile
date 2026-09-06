@@ -42,6 +42,7 @@ kernel/ISR/KEYBOARD/keyboard.o \
 kernel/ISR/TIMER/timer.o \
 kernel/MEM/physical_memory_manager.o \
 kernel/MEM/virtual_memory_manager.o \
+kernel/MEM/usercopy.o \
 kernel/MEM/kernel_heap_allocator.o \
 kernel/MEM/kmalloc.o \
 kernel/FILESYSTEM/ata.o \

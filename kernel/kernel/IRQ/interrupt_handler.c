@@ -1,9 +1,11 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include <kernel/pic.h>
 #include <libk/stdio.h>
 #include <kernel/interrupt_frame.h>
 #include <kernel/keyboard.h>
 #include <kernel/timer.h>
+#include <kernel/task.h>
 
 void interrupt_handler(interrupt_frame_t *regs)
 {
@@ -29,24 +31,52 @@ void interrupt_handler(interrupt_frame_t *regs)
     PIC_sendEOI(int_num - 32); //Subtract 32 becuase of the offset
 }
 
-void page_fault_handler(uint32_t error_code) {
-    uint32_t faulting_address;
-    /* 读 CR2 寄存器，获得发生 Page Fault 的线性地址 */
-    __asm__ volatile ("mov %%cr2, %0" : "=r"(faulting_address));
+void exception_handler(interrupt_frame_t *regs) {
+    uint32_t faulting_address = 0;
+    bool from_user;
 
-    kprintf("Page Fault! EIP=0x%x, addr=0x%x, err=0x%x\n",
-           /* 你可以从栈里再取出返回 EIP，或者简化为： */ 0, 
-           faulting_address,
-           error_code);
-
-    /* 根据 error_code 位含义，决定是保护性错误还是不存在页。 */
-    /* bit 0 = 0 (not-present) / 1 (protection fault) */
-    if (!(error_code & 0x1)) {
-        kprintf(" - Page not present\n");
-    } else {
-        kprintf(" - Protection violation\n");
+    if (!regs) {
+        __asm__ volatile ("cli");
+        for (;;) {
+            __asm__ volatile ("hlt");
+        }
     }
 
-    /* … 这里可以做缺页中断处理，或者直接死机 … */
-    for (;;);  /* 简单处理：停在这里 */
+    if (regs->int_num == 14) {
+        __asm__ volatile ("mov %%cr2, %0" : "=r"(faulting_address));
+    }
+
+    from_user = (regs->cs & 3U) == 3U;
+    kprintf("\nexception %u: eip=0x%x err=0x%x",
+            regs->int_num, regs->eip, regs->dummy_error);
+    if (regs->int_num == 14) {
+        kprintf(" address=0x%x", faulting_address);
+    }
+    kprintf(" mode=%s\n", from_user ? "user" : "kernel");
+
+    if (from_user) {
+        if (regs->int_num == 14) {
+            task_t *task = task_current();
+            const char *access = (regs->dummy_error & (1U << 4)) ? "execute" :
+                                 (regs->dummy_error & (1U << 1)) ? "write" :
+                                                                  "read";
+            const char *reason = (regs->dummy_error & 1U) ? "protection violation" :
+                                                            "page not present";
+
+            kprintf("Segmentation fault: pid=%u image=%s address=0x%x access=%s (%s)\n",
+                    task ? task->pid : 0,
+                    task ? task->image_path : "unknown",
+                    faulting_address,
+                    access,
+                    reason);
+        }
+        task_exit_current(128 + (int)regs->int_num, regs);
+        return;
+    }
+
+    kprintf("fatal kernel exception; system halted\n");
+    __asm__ volatile ("cli");
+    for (;;) {
+        __asm__ volatile ("hlt");
+    }
 }

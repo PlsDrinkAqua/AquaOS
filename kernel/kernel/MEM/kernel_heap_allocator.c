@@ -8,23 +8,19 @@
 #include "kernel/kha.h"
 
 
-#define KERNEL_VIRT_OFFSET 0xC0000000UL
+#define KERNEL_HEAP_START  0xD0000000UL
 #define PAGE_SIZE       0x1000U                          // 4 KiB
 
 #define VMM_PRESENT  (1<<0)
 #define VMM_RW       (1<<1)
 #define VMM_USER     (1<<2)
 
-// 从 linker script 导入的符号，标记内核镜像末尾
-extern uint8_t _kernel_end;
-
 // 当前的 heap break（下一个可用虚拟地址）
 static uintptr_t heap_brk;
 
-// 1) 初始化 heap_brk，取 _kernel_end 上对齐到下一页
+// Keep heap mappings separate from the physical direct-map window.
 void vmm_heap_init(void) {
-    uintptr_t start = (uintptr_t)&_kernel_end;
-    heap_brk = (start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    heap_brk = KERNEL_HEAP_START;
 }
 
 // 2) 按页分配：连续 npages 页，每页物理分配 + 虚拟映射

@@ -136,6 +136,7 @@ int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags) {
 
     page_directory_entry_t *pde = &current_pd->entries[pd_idx];
     page_table_t *pt = ref_tables[pd_idx];
+    bool created_page_table = false;
 
     bool want_user = (flags & VMM_USER) != 0;
 
@@ -156,6 +157,7 @@ int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags) {
         pde->page_size = 0;
 
         ref_tables[pd_idx] = pt;
+        created_page_table = true;
     } else {
         // PDE 已存在时，不允许跨权限域复用
         if (want_user && !pde->user) {
@@ -193,7 +195,11 @@ int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags) {
     pte->rw      = (flags & VMM_RW) ? 1 : 0;
     pte->user    = want_user ? 1 : 0;
 
-    vmm_invlpg(vaddr);
+    if (created_page_table) {
+        vmm_load_cr3(current_pd);
+    } else {
+        vmm_invlpg(vaddr);
+    }
     return 0;
 }
 
@@ -236,6 +242,49 @@ uint32_t vmm_translate(uintptr_t vaddr) {
     if (!pt->pages[pt_idx].present)      return 0;
 
     return (pt->pages[pt_idx].frame << 12) | offset;
+}
+
+bool vmm_user_range_valid(const void *ptr, uint32_t size, bool writable) {
+    uintptr_t start = (uintptr_t)ptr;
+    uintptr_t last;
+    uintptr_t page;
+
+    if (size == 0) {
+        return start < KERNEL_VIRT_OFFSET;
+    }
+
+    last = start + size - 1;
+    if (last < start || start >= KERNEL_VIRT_OFFSET || last >= KERNEL_VIRT_OFFSET) {
+        return false;
+    }
+
+    page = start & ~(PAGE_SIZE - 1);
+    for (;;) {
+        uint32_t pd_idx = (page >> 22) & 0x3FF;
+        uint32_t pt_idx = (page >> 12) & 0x3FF;
+        page_directory_entry_t *pde = &current_pd->entries[pd_idx];
+        page_table_t *pt;
+        page_table_entry_t *pte;
+
+        if (!pde->present || !pde->user || (writable && !pde->rw)) {
+            return false;
+        }
+
+        pt = ref_tables[pd_idx];
+        if (!pt) {
+            return false;
+        }
+
+        pte = &pt->pages[pt_idx];
+        if (!pte->present || !pte->user || (writable && !pte->rw)) {
+            return false;
+        }
+
+        if (page >= (last & ~(PAGE_SIZE - 1))) {
+            return true;
+        }
+        page += PAGE_SIZE;
+    }
 }
 
 int vmm_map_region(uintptr_t vstart,

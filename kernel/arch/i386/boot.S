@@ -1,5 +1,7 @@
 # Define high-half offset
 .set ADDR_OFFSET, 0xC0000000
+.set DIRECT_MAP_BYTES, 0x04000000
+.set DIRECT_MAP_TABLES, 16
 
 # Multiboot header constants
 .set ALIGN,    1<<0             # align loaded modules on page boundaries
@@ -30,8 +32,10 @@ stack_top:
 boot_page_directory:
 .skip 4096
 .globl boot_page_table1
+.globl boot_page_tables
 boot_page_table1:
-.skip 4096
+boot_page_tables:
+.skip DIRECT_MAP_TABLES * 4096
 
 # Kernel entry point
 .section .text
@@ -41,10 +45,10 @@ _start:
     # Load physical address of page table
     movl $(boot_page_table1 - ADDR_OFFSET), %edi
 
-    # Map every 4K page from phys 0 up to _kernel_end
+    # Build a contiguous 64 MiB physical direct map.
     movl $0, %esi                   # physical address
 1:
-    cmpl $(_kernel_end - ADDR_OFFSET), %esi
+    cmpl $DIRECT_MAP_BYTES, %esi
     jge 2f                         # done mapping kernel region
 
     # entry = phys | present | writable
@@ -58,14 +62,22 @@ _start:
     jmp 1b
 
 2:
-    # Map VGA text buffer at last PTE (index 1023)
-    movl $(0x000B8000 | 0x003), boot_page_table1 - ADDR_OFFSET + 1023*4
-
-    # Install page table at PDE 0 and PDE 768 (0xC0000000)
+    # Keep a temporary identity mapping for the bootstrap code.
     movl $(boot_page_table1 - ADDR_OFFSET + 0x003), \
          boot_page_directory - ADDR_OFFSET + 0
-    movl $(boot_page_table1 - ADDR_OFFSET + 0x003), \
-         boot_page_directory - ADDR_OFFSET + 768*4
+
+    # Install the direct-map tables at 0xC0000000.
+    movl $(boot_page_directory - ADDR_OFFSET + 768*4), %edi
+    movl $(boot_page_tables - ADDR_OFFSET), %esi
+    movl $DIRECT_MAP_TABLES, %ecx
+3:
+    movl %esi, %edx
+    orl $0x003, %edx
+    movl %edx, (%edi)
+    addl $4096, %esi
+    addl $4, %edi
+    decl %ecx
+    jnz 3b
 
     # Load CR3 with page directory phys address
     movl $(boot_page_directory - ADDR_OFFSET), %ecx
