@@ -15,6 +15,10 @@ enum {
     SYS_SBRK    = 10,
     SYS_YIELD   = 11,
     SYS_SLEEP   = 12,
+    SYS_OPEN    = 13,
+    SYS_CLOSE   = 14,
+    SYS_LSEEK   = 15,
+    SYS_READDIR = 16,
 };
 
 #ifdef __cplusplus

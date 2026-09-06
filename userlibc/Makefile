@@ -27,8 +27,12 @@ string/strcmp.o \
 string/strncmp.o \
 string/strlen.o \
 syscall/syscall.o \
+unistd/close.o \
 unistd/exec.o \
+unistd/lseek.o \
+unistd/open.o \
 unistd/read.o \
+unistd/readdir.o \
 unistd/sbrk.o \
 unistd/sleep.o \
 unistd/spawn.o \

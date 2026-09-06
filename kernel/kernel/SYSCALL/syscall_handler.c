@@ -2,6 +2,7 @@
 #include <libk/stdio.h>
 #include <libk/string.h>
 #include <kernel/elf.h>
+#include <kernel/fd.h>
 #include <kernel/tty.h>
 #include <kernel/keyboard.h>
 #include <kernel/task.h>
@@ -23,6 +24,10 @@ enum {
     SYS_SBRK    = 10,
     SYS_YIELD   = 11,
     SYS_SLEEP   = 12,
+    SYS_OPEN    = 13,
+    SYS_CLOSE   = 14,
+    SYS_LSEEK   = 15,
+    SYS_READDIR = 16,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -30,17 +35,17 @@ void syscall_handler(interrupt_frame_t *regs)
     task_reap_exited_children();
 
     switch (regs->eax) {
-        case SYS_PUTCHAR:
-            terminal_putchar(regs->ebx);
-            regs->eax = regs->ebx;
-            break;
-
-        case SYS_WRITE: {
-            if (regs->ebx != 1 && regs->ebx != 2) {
+        case SYS_PUTCHAR: {
+            char c = (char)regs->ebx;
+            if (fd_write(1, &c, 1) < 0) {
                 regs->eax = (uint32_t)-1;
                 break;
             }
+            regs->eax = regs->ebx;
+            break;
+        }
 
+        case SYS_WRITE: {
             const char *buf = (const char *)regs->ecx;
             uint32_t count = regs->edx;
 
@@ -49,11 +54,7 @@ void syscall_handler(interrupt_frame_t *regs)
                 break;
             }
 
-            for (uint32_t i = 0; i < count; i++) {
-                terminal_putchar(buf[i]);
-            }
-
-            regs->eax = count;
+            regs->eax = (uint32_t)fd_write((int)regs->ebx, buf, count);
             break;
         }
 
@@ -62,11 +63,6 @@ void syscall_handler(interrupt_frame_t *regs)
             break;
 
         case SYS_READ: {
-            if (regs->ebx != 0) {
-                regs->eax = (uint32_t)-1;
-                break;
-            }
-
             char *buf = (char *)regs->ecx;
             uint32_t count = regs->edx;
             uint32_t read = 0;
@@ -78,6 +74,31 @@ void syscall_handler(interrupt_frame_t *regs)
 
             if (!vmm_user_range_valid(buf, count, true)) {
                 regs->eax = (uint32_t)-1;
+                break;
+            }
+
+            if (fd_type((int)regs->ebx) != FD_STDIN) {
+                char chunk[256];
+
+                while (read < count) {
+                    uint32_t wanted = count - read;
+                    if (wanted > sizeof(chunk)) wanted = sizeof(chunk);
+                    int n = fd_read((int)regs->ebx, chunk, wanted);
+                    if (n < 0) {
+                        regs->eax = read ? read : (uint32_t)-1;
+                        break;
+                    }
+                    if (n == 0) {
+                        regs->eax = read;
+                        break;
+                    }
+                    if (copy_to_user(buf + read, chunk, (size_t)n) < 0) {
+                        regs->eax = (uint32_t)-1;
+                        break;
+                    }
+                    read += (uint32_t)n;
+                    regs->eax = read;
+                }
                 break;
             }
 
@@ -149,6 +170,46 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_SLEEP:
             task_sleep_current(regs->ebx, regs);
             break;
+
+        case SYS_OPEN: {
+            char path[256];
+            if (copy_string_from_user(path, sizeof(path),
+                                      (const char *)regs->ebx) < 0) {
+                regs->eax = (uint32_t)-1;
+            } else {
+                regs->eax = (uint32_t)fd_open(path, (int)regs->ecx);
+            }
+            break;
+        }
+
+        case SYS_CLOSE:
+            regs->eax = (uint32_t)fd_close((int)regs->ebx);
+            break;
+
+        case SYS_LSEEK:
+            regs->eax = (uint32_t)fd_seek((int)regs->ebx,
+                                          (int32_t)regs->ecx,
+                                          (int)regs->edx);
+            break;
+
+        case SYS_READDIR: {
+            char name[EXT2_NAME_MAX + 1];
+            char *user_name = (char *)regs->ecx;
+            uint32_t name_size = regs->edx;
+            int result;
+
+            if (name_size == 0 || name_size > sizeof(name) ||
+                !vmm_user_range_valid(user_name, name_size, true)) {
+                regs->eax = (uint32_t)-1;
+                break;
+            }
+            result = fd_read_dir((int)regs->ebx, name, name_size);
+            if (result > 0 && copy_to_user(user_name, name, kstrlen(name) + 1) < 0) {
+                result = -1;
+            }
+            regs->eax = (uint32_t)result;
+            break;
+        }
 
         default:
             regs->eax = (uint32_t)-1;

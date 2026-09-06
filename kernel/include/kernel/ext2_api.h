@@ -12,6 +12,8 @@ typedef struct {
     int used;
 } ext2_file_t;
 
+#define EXT2_NAME_MAX 255
+
 // 目录项 v2（带 file_type 字段）
 struct ext2_dir_entry_2 {
     uint32_t inode;       // 本条目的 inode 号（0 表示空条目）
@@ -35,9 +37,11 @@ enum ext2_file_type {
 
 int ext2_init(void);
 void ext2_selftest(void);
-size_t ext2_filesize(int fd);
-int ext2_open(const char *path);
-int ext2_close(int fd);
-int ext2_read(int fd, void *buf, size_t count);
+int ext2_file_open(const char *path, ext2_file_t *file);
+size_t ext2_file_size(const ext2_file_t *file);
+int ext2_file_is_dir(const ext2_file_t *file);
+int ext2_file_read(ext2_file_t *file, void *buf, size_t count);
+int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence);
+int ext2_file_read_dir(ext2_file_t *file, char *name, size_t name_size);
 
 #endif

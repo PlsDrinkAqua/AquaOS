@@ -56,12 +56,12 @@ static uint32_t kernel_vaddr_to_paddr(uint32_t vaddr) {
     return 0;
 }
 
-static void task_preempt_disable(void) {
+void task_preemption_disable(void) {
     preempt_disable_depth++;
     __asm__ volatile ("" ::: "memory");
 }
 
-static void task_preempt_enable(void) {
+void task_preemption_enable(void) {
     __asm__ volatile ("" ::: "memory");
     if (preempt_disable_depth > 0) {
         preempt_disable_depth--;
@@ -143,6 +143,7 @@ static task_t *task_alloc(void) {
             }
             task_table[i].state = TASK_UNUSED;
             task_table[i].user_stack_top = USER_STACK_TOP;
+            fd_table_init(&task_table[i]);
             return &task_table[i];
         }
     }
@@ -257,9 +258,9 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
 
     task_copy_path(image_path, sizeof(image_path), path);
 
-    task_preempt_disable();
+    task_preemption_disable();
     if (elf_load_from_file_into_address_space(image_path, pd, &res) < 0) {
-        task_preempt_enable();
+        task_preemption_enable();
         return -1;
     }
 
@@ -267,11 +268,11 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
     vmm_switch_address_space(pd);
     if (task_prepare_user_stack(task) < 0) {
         vmm_switch_address_space(old_pd);
-        task_preempt_enable();
+        task_preemption_enable();
         return -1;
     }
     vmm_switch_address_space(old_pd);
-    task_preempt_enable();
+    task_preemption_enable();
 
     task->entry = res.entry;
     task->heap_start = res.heap_start;
@@ -316,6 +317,7 @@ void tasking_init(void) {
     task_table[0].pid = next_pid++;
     task_table[0].state = TASK_UNUSED;
     task_table[0].user_stack_top = USER_STACK_TOP;
+    fd_table_init(&task_table[0]);
     current_task = &task_table[0];
     preempt_disable_depth = 0;
 }
@@ -377,6 +379,8 @@ int task_exec_current(const char *path, interrupt_frame_t *regs) {
     if (old_pd) {
         vmm_destroy_address_space(old_pd);
     }
+    fd_table_close_all(current_task);
+    fd_table_init(current_task);
 
     regs->eip = current_task->entry;
     regs->useresp = current_task->user_stack_top;
@@ -599,6 +603,7 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
     }
 
     exiting = current_task;
+    fd_table_close_all(exiting);
     exiting->state = TASK_EXITED;
     exiting->exit_status = status;
     exiting->waiting_for_pid = 0;
@@ -670,6 +675,7 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
         }
     }
 
+    fd_table_init(exiting);
     task_switch_to(exiting);
     regs->eip = exiting->entry;
     regs->useresp = exiting->user_stack_top;

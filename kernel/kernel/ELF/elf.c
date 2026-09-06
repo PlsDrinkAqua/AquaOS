@@ -321,32 +321,30 @@ int elf_load_from_memory(const void *image, size_t image_size, elf_load_result_t
 }
 
 int elf_load_from_file(const char *path, elf_load_result_t *out) {
+    ext2_file_t file;
+
     if (!path || !out) return -1;
 
-    int fd = ext2_open(path);
-    if (fd < 0) {
-        kprintf("ELF: ext2_open(\"%s\") failed\n", path);
+    if (ext2_file_open(path, &file) < 0) {
+        kprintf("ELF: open(\"%s\") failed\n", path);
         return -1;
     }
 
-    size_t size = ext2_filesize(fd);
+    size_t size = ext2_file_size(&file);
     if (size == 0) {
-        kprintf("ELF: empty file or ext2_filesize failed\n");
-        ext2_close(fd);
+        kprintf("ELF: empty file\n");
         return -1;
     }
 
     uint8_t *buf = kmalloc(size);
     if (!buf) {
         kprintf("ELF: kmalloc(%u) failed\n", (unsigned)size);
-        ext2_close(fd);
         return -1;
     }
 
-    size_t n = ext2_read(fd, buf, size);
-    ext2_close(fd);
+    int n = ext2_file_read(&file, buf, size);
 
-    if (n != size) {
+    if (n < 0 || (size_t)n != size) {
         kprintf("ELF: ext2_read incomplete (%u/%u)\n", (unsigned)n, (unsigned)size);
         kfree(buf);
         return -1;
@@ -360,32 +358,30 @@ int elf_load_from_file(const char *path, elf_load_result_t *out) {
 int elf_load_from_file_into_address_space(const char *path,
                                           page_directory_t *pd,
                                           elf_load_result_t *out) {
+    ext2_file_t file;
+
     if (!path || !pd || !out) return -1;
 
-    int fd = ext2_open(path);
-    if (fd < 0) {
-        kprintf("ELF: ext2_open(\"%s\") failed\n", path);
+    if (ext2_file_open(path, &file) < 0) {
+        kprintf("ELF: open(\"%s\") failed\n", path);
         return -1;
     }
 
-    size_t size = ext2_filesize(fd);
+    size_t size = ext2_file_size(&file);
     if (size == 0) {
-        kprintf("ELF: empty file or ext2_filesize failed\n");
-        ext2_close(fd);
+        kprintf("ELF: empty file\n");
         return -1;
     }
 
     uint8_t *buf = kmalloc(size);
     if (!buf) {
         kprintf("ELF: kmalloc(%u) failed\n", (unsigned)size);
-        ext2_close(fd);
         return -1;
     }
 
-    size_t n = ext2_read(fd, buf, size);
-    ext2_close(fd);
+    int n = ext2_file_read(&file, buf, size);
 
-    if (n != size) {
+    if (n < 0 || (size_t)n != size) {
         kprintf("ELF: ext2_read incomplete (%u/%u)\n", (unsigned)n, (unsigned)size);
         kfree(buf);
         return -1;

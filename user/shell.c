@@ -17,13 +17,60 @@ static void write_str(const char *s) {
     write(1, s, (unsigned)(p - s));
 }
 
+static const char *skip_spaces(const char *s) {
+    while (*s == ' ') s++;
+    return s;
+}
+
+static void cat_file(const char *path) {
+    char buf[128];
+    int fd = open(path, O_RDONLY);
+
+    if (fd < 0) {
+        printf("cat: cannot open %s\n", path);
+        return;
+    }
+
+    for (;;) {
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n < 0) {
+            printf("cat: cannot read %s\n", path);
+            break;
+        }
+        if (n == 0) break;
+        if (write(1, buf, (size_t)n) != n) break;
+    }
+    close(fd);
+}
+
+static void list_dir(const char *path) {
+    char name[256];
+    int fd = open(path, O_RDONLY);
+
+    if (fd < 0) {
+        printf("ls: cannot open %s\n", path);
+        return;
+    }
+
+    for (;;) {
+        int result = readdir(fd, name, sizeof(name));
+        if (result < 0) {
+            printf("ls: cannot read %s\n", path);
+            break;
+        }
+        if (result == 0) break;
+        puts(name);
+    }
+    close(fd);
+}
+
 static void run_command(const char *line) {
     if (line[0] == '\0') {
         return;
     }
 
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, taskinfo");
+        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, fdtest, cat, ls, taskinfo");
         return;
     }
 
@@ -100,6 +147,35 @@ static void run_command(const char *line) {
         } else {
             printf("tasktest exited with status %d\n", wait(pid));
         }
+        return;
+    }
+
+    if (strcmp(line, "fdtest") == 0) {
+        int pid = spawn("/fdtest");
+        if (pid < 0) {
+            printf("spawn failed: /fdtest\n");
+        } else {
+            printf("fdtest exited with status %d\n", wait(pid));
+        }
+        return;
+    }
+
+    if (strncmp(line, "cat ", 4) == 0) {
+        const char *path = skip_spaces(line + 4);
+        if (*path == '\0') puts("usage: cat <path>");
+        else cat_file(path);
+        return;
+    }
+
+    if (strcmp(line, "ls") == 0) {
+        list_dir("/");
+        return;
+    }
+
+    if (strncmp(line, "ls ", 3) == 0) {
+        const char *path = skip_spaces(line + 3);
+        if (*path == '\0') list_dir("/");
+        else list_dir(path);
         return;
     }
 

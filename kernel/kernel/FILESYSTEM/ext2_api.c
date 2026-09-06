@@ -1,105 +1,99 @@
 #include <stdint.h>
+
 #include <libk/stdio.h>
 #include <libk/string.h>
 
-#include "kernel/ext2_api.h"
-#include "kernel/ext2.h"
-#include "kernel/ata.h"
-#include "kernel/kmalloc.h"
-#include "kernel/vmm.h"
+#include <kernel/ata.h>
+#include <kernel/ext2.h>
+#include <kernel/ext2_api.h>
+#include <kernel/kmalloc.h>
 
-#define MAX_FD 16
-#define EXT2_ROOT_INO 2    /* ext2 根目录的 inode 编号 */
+#define EXT2_ROOT_INO 2
+#define EXT2_S_IFMT  0xF000
+#define EXT2_S_IFDIR 0x4000
+#define EXT2_S_IFREG 0x8000
 
-static ext2_file_t file_table[MAX_FD];
+static uint64_t ext2_inode_size(const struct ext2_inode *inode) {
+    uint64_t size = inode->i_size_lo;
+    if ((inode->i_mode & EXT2_S_IFMT) == EXT2_S_IFREG) {
+        size |= (uint64_t)inode->i_size_hi << 32;
+    }
+    return size;
+}
+
+static int ext2_inode_block(const struct ext2_inode *inode,
+                            uint32_t block_index,
+                            uint32_t *block_out) {
+    const struct ext2_super_block *sb = ext2_sb();
+    uint32_t block_size = 1024U << sb->s_log_block_size;
+    uint32_t pointers_per_block = block_size / sizeof(uint32_t);
+
+    if (block_index < 12) {
+        *block_out = inode->i_block[block_index];
+        return 0;
+    }
+
+    block_index -= 12;
+    if (block_index < pointers_per_block && inode->i_block[12]) {
+        uint32_t *indirect = kmalloc(block_size);
+        if (!indirect) return -1;
+        if (ext2_read_block(inode->i_block[12], indirect) < 0) {
+            kfree(indirect);
+            return -1;
+        }
+        *block_out = indirect[block_index];
+        kfree(indirect);
+        return 0;
+    }
+
+    return -1;
+}
 
 int ext2_init(void) {
-    block_devices_init();;
-    if (ext2_driver_init() < 0){
-        kprintf("EXT2 initilization failed!\n");
+    block_devices_init();
+    if (ext2_driver_init() < 0) {
+        kprintf("EXT2 initialization failed!\n");
         return -1;
     }
-    kmemset(file_table, 0, sizeof(file_table));
     return 0;
 }
 
-int ext2_read_dir(uint32_t dir_ino,
-                  void (*entry_cb)(const char *name, uint32_t ino))
-{
-    // 1) 读取目录 inode
-    struct ext2_inode dir_inode;
-    if (ext2_read_inode(dir_ino, &dir_inode) < 0)
-        return -1;
+static uint32_t ext2_lookup(uint32_t dir_ino, const char *name) {
+    struct ext2_inode inode;
+    const struct ext2_super_block *sb;
+    uint32_t block_size;
+    uint32_t blocks;
+    uint8_t *buf;
+    size_t wanted_len;
 
-    // 2) 计算块大小，申请缓冲
-    const struct ext2_super_block *sb = ext2_sb();
-    uint32_t block_size = 1024U << sb->s_log_block_size;
-    uint8_t *buf = kmalloc(block_size);
-    if (!buf) return -1;
+    if (ext2_read_inode(dir_ino, &inode) < 0 ||
+        (inode.i_mode & EXT2_S_IFMT) != EXT2_S_IFDIR) return 0;
 
-    // 3) 遍历直接块
-    for (int i = 0; i < 12; i++) {
-        uint32_t blk = dir_inode.i_block[i];
-        if (!blk) continue;
-        if (ext2_read_block(blk, buf) < 0) continue;
-
-        // 4) 在块中解析目录项
-        uint32_t offset = 0;
-        while (offset < block_size) {
-            struct ext2_dir_entry_2 *de = (void*)(buf + offset);
-            if (de->inode) {
-                char name[256];
-                kmemcpy(name, de->name, de->name_len);
-                name[de->name_len] = '\0';
-                entry_cb(name, de->inode);
-            }
-            if (de->rec_len < 8) break;
-            offset += de->rec_len;
-        }
-    }
-
-    // 5) 清理并退出
-    kfree(buf);
-    return 0;
-}
-
-
-/**
- * 在目录 dir_ino 中查名字 name，返回对应的 inode（找不到返回 0）
- */
-uint32_t ext2_lookup(uint32_t dir_ino, const char *name) {
-    struct ext2_inode dir_inode;
-    if (ext2_read_inode(dir_ino, &dir_inode) < 0)
-        return 0;
-
-    const struct ext2_super_block *sb = ext2_sb();
-    uint32_t block_size = 1024U << sb->s_log_block_size;
-    uint8_t *buf = kmalloc(block_size);
+    sb = ext2_sb();
+    block_size = 1024U << sb->s_log_block_size;
+    blocks = (inode.i_size_lo + block_size - 1) / block_size;
+    wanted_len = kstrlen(name);
+    buf = kmalloc(block_size);
     if (!buf) return 0;
 
-    for (int i = 0; i < 12; i++) {
-        uint32_t blk = dir_inode.i_block[i];
-        if (!blk) continue;
-        if (ext2_read_block(blk, buf) < 0) continue;
-
+    for (uint32_t i = 0; i < blocks; i++) {
+        uint32_t block;
         uint32_t offset = 0;
-        while (offset < block_size) {
-            struct ext2_dir_entry_2 *de = (void*)(buf + offset);
-            if (de->inode) {
-                /* 取出名字，注意 name_len 不是 '\0' 结尾 */
-                char entry_name[256];
-                uint32_t len = de->name_len;
-                if (len >= sizeof(entry_name)) len = sizeof(entry_name) - 1;
-                kmemcpy(entry_name, de->name, len);
-                entry_name[len] = '\0';
 
-                if (kstrcmp(entry_name, name) == 0) {
-                    uint32_t found = de->inode;
-                    kfree(buf);
-                    return found;
-                }
+        if (ext2_inode_block(&inode, i, &block) < 0 || !block ||
+            ext2_read_block(block, buf) < 0) continue;
+
+        while (offset + 8 <= block_size &&
+               (uint64_t)i * block_size + offset < inode.i_size_lo) {
+            struct ext2_dir_entry_2 *de = (void *)(buf + offset);
+            if (de->rec_len < 8 || offset + de->rec_len > block_size ||
+                de->name_len > de->rec_len - 8) break;
+            if (de->inode && de->name_len == wanted_len &&
+                kmemcmp(de->name, name, wanted_len) == 0) {
+                uint32_t found = de->inode;
+                kfree(buf);
+                return found;
             }
-            if (de->rec_len < 8) break;
             offset += de->rec_len;
         }
     }
@@ -108,145 +102,160 @@ uint32_t ext2_lookup(uint32_t dir_ino, const char *name) {
     return 0;
 }
 
+int ext2_file_open(const char *path, ext2_file_t *file) {
+    uint32_t ino = EXT2_ROOT_INO;
+    struct ext2_inode inode;
+    char *saveptr;
+    char *tok;
+    char *tmp;
+    size_t path_len;
 
-/**
- * 打开一个绝对路径（只支持以 '/' 开头），
- * 返回 fd (0..MAX_FD-1)，失败返回 -1
- */
-int ext2_open(const char *path) {
-    if (!path || path[0] != '/')
-        return -1;
+    /* Until cwd support exists, relative paths are resolved from ext2 root. */
+    if (!path || path[0] == '\0' || !file) return -1;
 
-    /* 复制一份可改写的路径 */
-    char tmp[kstrlen(path) + 1];
+    path_len = kstrlen(path);
+    tmp = kmalloc(path_len + 1);
+    if (!tmp) return -1;
     kstrcpy(tmp, path);
 
-    /* 从根 inode 开始逐级 lookup */
-    uint32_t ino = EXT2_ROOT_INO;
-    char *saveptr, *tok = kstrtok_r(tmp, "/", &saveptr);
+    tok = kstrtok_r(tmp, "/", &saveptr);
     while (tok) {
         ino = ext2_lookup(ino, tok);
-        if (ino == 0)
+        if (!ino) {
+            kfree(tmp);
             return -1;
+        }
         tok = kstrtok_r(NULL, "/", &saveptr);
     }
+    kfree(tmp);
 
-    /* 分配一个 fd 槽 */
-    for (int fd = 0; fd < MAX_FD; fd++) {
-        if (!file_table[fd].used) {
-            struct ext2_inode tmp_inode;
-            /* 先读 inode 原始数据 */
-            ext2_read_inode(ino, &tmp_inode);
-
-            file_table[fd].used  = 1;
-            file_table[fd].ino   = ino;
-            file_table[fd].pos   = 0;
-            /* 存下完整 inode 以备后续读取块时使用 */
-            file_table[fd].inode = tmp_inode;
-
-            /* 合并 i_size_lo 和 i_size_hi */
-            uint64_t lo = tmp_inode.i_size_lo;
-            uint64_t hi = tmp_inode.i_size_hi;
-            file_table[fd].size = lo | (hi << 32);
-
-            return fd;
-        }
-    }
-
-    return -1;  /* 没有空闲槽 */
+    if (ext2_read_inode(ino, &inode) < 0) return -1;
+    kmemset(file, 0, sizeof(*file));
+    file->used = 1;
+    file->ino = ino;
+    file->inode = inode;
+    file->size = ext2_inode_size(&inode);
+    return 0;
 }
 
-/**
- * 从 fd 对应的文件当前位置读取最多 count 字节到 buf，
- * 返回实际读到的字节数（可能 < count），出错返回 -1
- */
-int ext2_read(int fd, void *buf, size_t count) {
-    if (fd < 0 || fd >= MAX_FD || !file_table[fd].used)
-        return -1;
+size_t ext2_file_size(const ext2_file_t *file) {
+    return file && file->used ? (size_t)file->size : 0;
+}
 
-    ext2_file_t *f = &file_table[fd];
-    size_t to_read   = count;
-    size_t total_r   = 0;
-    const struct ext2_inode *inode = &f->inode;
-    const struct ext2_super_block *sb = ext2_sb();
-    uint32_t block_size = 1024U << sb->s_log_block_size;
+int ext2_file_is_dir(const ext2_file_t *file) {
+    return file && file->used &&
+           (file->inode.i_mode & EXT2_S_IFMT) == EXT2_S_IFDIR;
+}
 
-    uint8_t *tmp = kmalloc(block_size);
+int ext2_file_read(ext2_file_t *file, void *buf, size_t count) {
+    const struct ext2_super_block *sb;
+    uint32_t block_size;
+    uint8_t *tmp;
+    size_t total = 0;
+
+    if (!file || !file->used || (!buf && count) || ext2_file_is_dir(file)) return -1;
+    if (count == 0) return 0;
+
+    sb = ext2_sb();
+    block_size = 1024U << sb->s_log_block_size;
+    tmp = kmalloc(block_size);
     if (!tmp) return -1;
 
-    while (to_read > 0 && f->pos < f->size) {
-        uint32_t blk_idx    = f->pos / block_size;
-        uint32_t blk_offset = f->pos % block_size;
-        uint32_t blk;
-        /* 仅支持直接块 */
-        if (blk_idx < 12) {
-            blk = inode->i_block[blk_idx];
-        } else {
-            break;  /* 超过直接块，不再支持 */
-        }
-        if (!blk) break;
+    while (total < count && file->pos < file->size) {
+        uint32_t block;
+        uint32_t block_index = file->pos / block_size;
+        uint32_t block_offset = file->pos % block_size;
+        size_t chunk = block_size - block_offset;
 
-        if (ext2_read_block(blk, tmp) < 0) break;
-
-        /* 计算本次拷贝长度 */
-        size_t chunk = block_size - blk_offset;
-        if (chunk > to_read)       chunk = to_read;
-        if (chunk > f->size - f->pos) chunk = f->size - f->pos;
-
-        kmemcpy((uint8_t*)buf + total_r, tmp + blk_offset, chunk);
-        f->pos      += chunk;
-        total_r     += chunk;
-        to_read     -= chunk;
+        if (ext2_inode_block(&file->inode, block_index, &block) < 0 || !block ||
+            ext2_read_block(block, tmp) < 0) break;
+        if (chunk > count - total) chunk = count - total;
+        if (chunk > file->size - file->pos) chunk = file->size - file->pos;
+        kmemcpy((uint8_t *)buf + total, tmp + block_offset, chunk);
+        file->pos += chunk;
+        total += chunk;
     }
 
     kfree(tmp);
-    return total_r;
+    return (int)total;
 }
 
-size_t ext2_filesize(int fd) {
-    if (fd < 0 || fd >= MAX_FD || !file_table[fd].used)
-        return 0;
-    return (size_t)file_table[fd].size;
+int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence) {
+    int64_t base;
+    int64_t next;
+
+    if (!file || !file->used) return -1;
+    if (whence == 0) base = 0;
+    else if (whence == 1) base = file->pos;
+    else if (whence == 2) base = file->size;
+    else return -1;
+
+    next = base + offset;
+    if (next < 0 || (uint64_t)next > file->size || next > 0x7fffffff) return -1;
+    file->pos = (uint32_t)next;
+    return (int)file->pos;
 }
 
-/**
- * 关闭 fd，使该槽可重用
- */
-int ext2_close(int fd) {
-    if (fd < 0 || fd >= MAX_FD || !file_table[fd].used)
-        return -1;
-    file_table[fd].used = 0;
+int ext2_file_read_dir(ext2_file_t *file, char *name, size_t name_size) {
+    const struct ext2_super_block *sb;
+    uint32_t block_size;
+    uint8_t *buf;
+
+    if (!file || !file->used || !name || name_size == 0 ||
+        !ext2_file_is_dir(file)) return -1;
+
+    sb = ext2_sb();
+    block_size = 1024U << sb->s_log_block_size;
+    buf = kmalloc(block_size);
+    if (!buf) return -1;
+
+    while (file->pos < file->size) {
+        uint32_t block;
+        uint32_t block_index = file->pos / block_size;
+        uint32_t offset = file->pos % block_size;
+        struct ext2_dir_entry_2 *de;
+
+        if (ext2_inode_block(&file->inode, block_index, &block) < 0 || !block ||
+            ext2_read_block(block, buf) < 0 || offset + 8 > block_size) {
+            kfree(buf);
+            return -1;
+        }
+        de = (void *)(buf + offset);
+        if (de->rec_len < 8 || offset + de->rec_len > block_size ||
+            de->name_len > de->rec_len - 8) {
+            kfree(buf);
+            return -1;
+        }
+        file->pos += de->rec_len;
+        if (de->inode) {
+            size_t len = de->name_len;
+            if (len + 1 > name_size) {
+                kfree(buf);
+                return -1;
+            }
+            kmemcpy(name, de->name, len);
+            name[len] = '\0';
+            kfree(buf);
+            return 1;
+        }
+    }
+
+    kfree(buf);
     return 0;
 }
 
 void ext2_selftest(void) {
-    const char *paths[] = {
-        "/hello.txt",
-        "/subdir/bar.dat",
-    };
+    ext2_file_t file;
+    char buf[129];
+    int n;
 
-    // 2. 依次打开、读取并打印两个测试文件
-    for (int i = 0; i < (int)(sizeof(paths)/sizeof(paths[0])); i++) {
-        const char *path = paths[i];
-        int fd = ext2_open(path);
-        if (fd < 0) {
-            kprintf("open \"%s\" failed.\n", path);
-            continue;
-        }
-        kprintf("open \"%s\" => fd=%d\n", path, fd);
-
-        // 假设每个文件内容不超过 128 字节
-        char buf[129];
-        size_t n = ext2_read(fd, buf, sizeof(buf)-1);
-        if ((int)n < 0) {
-            kprintf("read \"%s\" failed.\n", path);
-        } else {
-            buf[n] = '\0';
-            kprintf("read \"%s\" => %u bytes: \"%s\"\n",
-                   path, n, buf);
-        }
-
-        ext2_close(fd);
-        kprintf("closed fd=%d\n\n", fd);
+    if (ext2_file_open("/hello.txt", &file) < 0) {
+        kprintf("ext2 selftest: open failed\n");
+        return;
+    }
+    n = ext2_file_read(&file, buf, sizeof(buf) - 1);
+    if (n >= 0) {
+        buf[n] = '\0';
+        kprintf("ext2 selftest: %s\n", buf);
     }
 }

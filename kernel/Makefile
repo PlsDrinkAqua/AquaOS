@@ -48,6 +48,7 @@ kernel/MEM/kmalloc.o \
 kernel/FILESYSTEM/ata.o \
 kernel/FILESYSTEM/ext2.o \
 kernel/FILESYSTEM/ext2_api.o\
+kernel/FILESYSTEM/fd.o\
 kernel/TSS/tss.o\
 kernel/USERMODE/usermode.o\
 kernel/MEM/user_heap_allocator.o\

@@ -2,6 +2,7 @@
 #define _KERNEL_TASK_H
 
 #include <stdint.h>
+#include <kernel/fd.h>
 #include <kernel/interrupt_frame.h>
 #include <kernel/paging.h>
 
@@ -19,7 +20,7 @@ typedef enum {
     TASK_EXITED,
 } task_state_t;
 
-typedef struct {
+typedef struct task {
     uint32_t pid;
     task_state_t state;
     char image_path[TASK_IMAGE_PATH_BYTES];
@@ -39,6 +40,7 @@ typedef struct {
     uint8_t waiting_for_keyboard;
     uint8_t wait_status_delivered;
     uint8_t detached;
+    fd_entry_t fds[TASK_FD_MAX];
     interrupt_frame_t saved_regs;
     int exit_status;
 } task_t;
@@ -49,6 +51,8 @@ int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out);
 int task_exec_current(const char *path, interrupt_frame_t *regs);
 int task_spawn_current(const char *path, interrupt_frame_t *regs);
 void task_yield_current(interrupt_frame_t *regs);
+void task_preemption_disable(void);
+void task_preemption_enable(void);
 void task_preempt_current(interrupt_frame_t *regs);
 int task_block_current_for_keyboard(interrupt_frame_t *regs, char *buf, uint32_t count);
 int task_complete_keyboard_read(char c);
