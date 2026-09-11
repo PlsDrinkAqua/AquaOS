@@ -23,7 +23,7 @@ def run():
         bar.write_text("foo\n")
         commands = ["mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
         programs = ["shell", "hello", "memtest", "yieldtest", "sleeptest", "faulttest",
-                    "tasktest", "fdtest", "unixtest", "cat", "ls", "echo", "argtest"]
+                    "tasktest", "fdtest", "unixtest", "cat", "ls", "echo", "argtest", "mkdir", "mkdirtest"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
@@ -101,6 +101,18 @@ def run():
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            command("mkdirtest", "mkdirtest: PASS")
+            command("mkdir /fromshell")
+            command("cd /fromshell")
+            command("mkdir one two")
+            listing = command("ls", "\none/\n")
+            if "\ntwo/\n" not in listing:
+                raise AssertionError(listing)
+            command("cd two")
+            command("pwd", "\n/fromshell/two\n")
+            command("echo saved > note")
+            command("cat note", "\nsaved\n")
+            command("cd /")
             command("argtest", "argtest: PASS")
             command("unixtest", "unixtest: PASS")
             command("/cat /hello.txt", "hello, ZenOS")
@@ -111,7 +123,9 @@ def run():
             command("cat /hello.txt /copy.txt", "\nhello, ZenOS\nhello world\nagain\n")
             command("cd /subdir")
             command("pwd", "\n/subdir\n")
-            command("ls", "bar.dat")
+            listing = command("ls", "\nbar.dat\n")
+            if "bar.dat/" in listing:
+                raise AssertionError(listing)
             command("cat bar.dat", "\nfoo\n")
             command("echo relative > local.txt")
             command("cat < local.txt", "\nrelative\n")
@@ -121,6 +135,18 @@ def run():
             command("cd /hello.txt", "cd: cannot change directory")
             command("pwd", "\n/\n")
             command("fdtest", "fdtest: PASS")
+            qmp("quit")
+            proc.wait(timeout=5)
+            # Validate actual disk structures, including link counts and bitmaps.
+            checked = subprocess.run(["e2fsck", "-fn", str(disk)],
+                                     text=True, capture_output=True)
+            if checked.returncode:
+                raise AssertionError(checked.stdout + checked.stderr)
+            persisted = subprocess.run(["debugfs", "-R", "cat /fromshell/two/note", str(disk)],
+                                       text=True, capture_output=True, check=True)
+            if persisted.stdout != "saved\n":
+                raise AssertionError("Directory contents did not persist: " + persisted.stdout)
+            print("PASS: ext2 integrity and persisted directory contents", flush=True)
             print("All shell smoke checks passed.", flush=True)
         finally:
             proc.terminate()

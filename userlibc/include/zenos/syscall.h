@@ -25,6 +25,7 @@ enum {
     SYS_PIPE    = 20,
     SYS_CHDIR   = 21,
     SYS_GETCWD  = 22,
+    SYS_MKDIR   = 23,
 };
 
 #ifdef __cplusplus

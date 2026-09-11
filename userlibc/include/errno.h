@@ -25,6 +25,7 @@ extern int errno;
 #define EFBIG   27
 #define ESPIPE  29
 #define ENOSPC  28
+#define EMLINK 31
 #define EPIPE   32
 #define ENOSYS  38
 

@@ -36,6 +36,7 @@ enum ext2_file_type {
 };
 
 int ext2_init(void);
+int ext2_mkdir(const char *path);
 void ext2_selftest(void);
 int ext2_file_open(const char *path, int flags, ext2_file_t *file);
 size_t ext2_file_size(const ext2_file_t *file);

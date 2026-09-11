@@ -101,31 +101,32 @@ int ext2_init(void) {
     return 0;
 }
 
-static uint32_t lookup(uint32_t dir_ino, const char *name) {
+static int lookup(uint32_t dir_ino, const char *name, uint32_t *found) {
     struct ext2_inode inode;
     uint32_t bs = block_size(), blocks;
     uint8_t *buf;
     size_t wanted = kstrlen(name);
-    if (ext2_read_inode(dir_ino, &inode) < 0 || (inode.i_mode & EXT2_S_IFMT) != EXT2_S_IFDIR) return 0;
+    if (ext2_read_inode(dir_ino, &inode) < 0) return -K_EIO;
+    if ((inode.i_mode & EXT2_S_IFMT) != EXT2_S_IFDIR) return -K_ENOTDIR;
     blocks = (inode.i_size_lo + bs - 1) / bs;
-    buf = kmalloc(bs); if (!buf) return 0;
+    buf = kmalloc(bs); if (!buf) return -K_ENOMEM;
     for (uint32_t i = 0; i < blocks; i++) {
         uint32_t block, offset = 0;
-        if (inode_block(&inode, i, &block) < 0 || !block || ext2_read_block(block, buf) < 0) continue;
+        if (inode_block(&inode, i, &block) < 0 || !block || ext2_read_block(block, buf) < 0) { kfree(buf); return -K_EIO; }
         while (offset + 8 <= bs && (uint64_t)i * bs + offset < inode.i_size_lo) {
             struct ext2_dir_entry_2 *de = (void *)(buf + offset);
-            if (de->rec_len < 8 || offset + de->rec_len > bs || de->name_len > de->rec_len - 8) break;
+            if (de->rec_len < 8 || offset + de->rec_len > bs || de->name_len > de->rec_len - 8) { kfree(buf); return -K_EIO; }
             if (de->inode && de->name_len == wanted && kmemcmp(de->name, name, wanted) == 0) {
-                uint32_t found = de->inode; kfree(buf); return found;
+                *found = de->inode; kfree(buf); return 0;
             }
             offset += de->rec_len;
         }
     }
-    kfree(buf); return 0;
+    kfree(buf); return -K_ENOENT;
 }
 
 static int add_dir_entry(uint32_t dir_ino, struct ext2_inode *dir,
-                         const char *name, uint32_t child_ino) {
+                         const char *name, uint32_t child_ino, uint8_t type) {
     uint32_t bs = block_size(), need = dir_rec_size(kstrlen(name));
     uint32_t blocks = (dir->i_size_lo + bs - 1) / bs;
     uint8_t *buf = kmalloc(bs);
@@ -144,7 +145,7 @@ static int add_dir_entry(uint32_t dir_ino, struct ext2_inode *dir,
                 if (de->inode) { de->rec_len = actual; new_de = (void *)(buf + offset + actual); available -= actual; }
                 else new_de = de;
                 new_de->inode = child_ino; new_de->rec_len = available;
-                new_de->name_len = kstrlen(name); new_de->file_type = EXT2_FT_REG_FILE;
+                new_de->name_len = kstrlen(name); new_de->file_type = type;
                 kmemcpy(new_de->name, name, new_de->name_len);
                 int result = ext2_write_block(block, buf) < 0 ? -K_EIO : 0;
                 kfree(buf); return result;
@@ -157,7 +158,7 @@ static int add_dir_entry(uint32_t dir_ino, struct ext2_inode *dir,
     if (inode_ensure_block(dir, blocks, &block) < 0) { kfree(buf); return -K_ENOSPC; }
     kmemset(buf, 0, bs);
     struct ext2_dir_entry_2 *de = (void *)buf;
-    de->inode = child_ino; de->rec_len = bs; de->name_len = kstrlen(name); de->file_type = EXT2_FT_REG_FILE;
+    de->inode = child_ino; de->rec_len = bs; de->name_len = kstrlen(name); de->file_type = type;
     kmemcpy(de->name, name, de->name_len);
     dir->i_size_lo += bs;
     if (ext2_write_block(block, buf) < 0 || ext2_write_inode(dir_ino, dir) < 0) { kfree(buf); return -K_EIO; }
@@ -174,8 +175,10 @@ static int resolve_path(const char *path, int create, uint32_t *ino_out) {
     kstrcpy(tmp, path); token = kstrtok_r(tmp, "/", &save);
     while (token) {
         char *next = kstrtok_r(NULL, "/", &save);
-        uint32_t found = lookup(ino, token);
-        if (!found) {
+        uint32_t found;
+        int result = lookup(ino, token, &found);
+        if (result < 0 && result != -K_ENOENT) { kfree(tmp); return result; }
+        if (result == -K_ENOENT) {
             struct ext2_inode parent, child;
             uint32_t child_ino;
             if (!create || next || !*token || kstrlen(token) > EXT2_NAME_MAX) { kfree(tmp); return -K_ENOENT; }
@@ -184,7 +187,7 @@ static int resolve_path(const char *path, int create, uint32_t *ino_out) {
             }
             if (ext2_alloc_inode(&child_ino) < 0) { kfree(tmp); return -K_ENOSPC; }
             kmemset(&child, 0, sizeof(child)); child.i_mode = EXT2_S_IFREG | 0644; child.i_links_count = 1;
-            if (ext2_write_inode(child_ino, &child) < 0 || add_dir_entry(ino, &parent, token, child_ino) < 0) {
+            if (ext2_write_inode(child_ino, &child) < 0 || add_dir_entry(ino, &parent, token, child_ino, EXT2_FT_REG_FILE) < 0) {
                 kfree(tmp); return -K_EIO;
             }
             found = child_ino;
@@ -192,6 +195,83 @@ static int resolve_path(const char *path, int create, uint32_t *ino_out) {
         ino = found; token = next;
     }
     kfree(tmp); *ino_out = ino; return 0;
+}
+
+int ext2_mkdir(const char *path) {
+    if (!path || !*path) return -K_ENOENT;
+    size_t length = kstrlen(path);
+    char *parent_path = kmalloc(length + 1);
+    if (!parent_path) return -K_ENOMEM;
+    kmemcpy(parent_path, path, length + 1);
+    while (length && parent_path[length - 1] == '/') parent_path[--length] = 0;
+    if (!length) { kfree(parent_path); return -K_EEXIST; }
+    size_t start = length;
+    while (start && parent_path[start - 1] != '/') start--;
+    const char *name = parent_path + start;
+    if (length - start > EXT2_NAME_MAX) { kfree(parent_path); return -K_ENAMETOOLONG; }
+
+    uint32_t parent_ino, existing, ino = 0, block = 0;
+    struct ext2_inode parent, child;
+    int result, counted = 0;
+    if (start) {
+        parent_path[start - 1] = 0;
+        result = resolve_path(*parent_path ? parent_path : "/", 0, &parent_ino);
+    } else {
+        parent_ino = EXT2_ROOT_INO;
+        result = 0;
+    }
+    if (result < 0) goto done;
+    if (ext2_read_inode(parent_ino, &parent) < 0) { result = -K_EIO; goto done; }
+    if ((parent.i_mode & EXT2_S_IFMT) != EXT2_S_IFDIR) { result = -K_ENOTDIR; goto done; }
+    result = lookup(parent_ino, name, &existing);
+    if (!result) { result = -K_EEXIST; goto done; }
+    if (result != -K_ENOENT) goto done;
+    if (parent.i_links_count == 65535) { result = -K_EMLINK; goto done; }
+
+    uint32_t bs = block_size();
+    uint8_t *buf = kmalloc(bs);
+    if (!buf) { result = -K_ENOMEM; goto done; }
+    if (ext2_alloc_inode(&ino) < 0) { result = -K_ENOSPC; goto cleanup; }
+    if (ext2_alloc_block(&block) < 0) { result = -K_ENOSPC; goto cleanup; }
+    kmemset(buf, 0, bs);
+    struct ext2_dir_entry_2 *dot = (void *)buf;
+    dot->inode = ino; dot->rec_len = dir_rec_size(1);
+    dot->name_len = 1; dot->file_type = EXT2_FT_DIR; dot->name[0] = '.';
+    struct ext2_dir_entry_2 *dotdot = (void *)(buf + dot->rec_len);
+    dotdot->inode = parent_ino; dotdot->rec_len = bs - dot->rec_len;
+    dotdot->name_len = 2; dotdot->file_type = EXT2_FT_DIR;
+    dotdot->name[0] = dotdot->name[1] = '.';
+    kmemset(&child, 0, sizeof(child));
+    child.i_mode = EXT2_S_IFDIR | 0755;
+    child.i_links_count = 2;
+    child.i_size_lo = bs; child.i_blocks = bs / 512; child.i_block[0] = block;
+    result = -K_EIO;
+    if (ext2_write_block(block, buf) < 0 || ext2_write_inode(ino, &child) < 0) goto cleanup;
+    if (ext2_adjust_dirs(ino, 1) < 0) goto cleanup;
+    counted = 1;
+    parent.i_links_count++;
+    if (ext2_write_inode(parent_ino, &parent) < 0) goto cleanup;
+    result = add_dir_entry(parent_ino, &parent, name, ino, EXT2_FT_DIR);
+    if (result < 0) {
+        parent.i_links_count--;
+        ext2_write_inode(parent_ino, &parent);
+        goto cleanup;
+    }
+    kfree(buf);
+    goto done;
+
+cleanup:
+    if (counted) ext2_adjust_dirs(ino, -1);
+    if (block) ext2_free_block(block);
+    if (ino) {
+        kmemset(&child, 0, sizeof(child));
+        ext2_write_inode(ino, &child);
+        ext2_free_inode(ino);
+    }
+    kfree(buf);
+done:
+    kfree(parent_path);
+    return result;
 }
 
 int ext2_file_open(const char *path, int flags, ext2_file_t *file) {

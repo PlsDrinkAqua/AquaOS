@@ -106,6 +106,8 @@ const struct ext2_group_desc *ext2_gbdt(void);
 int ext2_read_inode(uint32_t inode_no, struct ext2_inode *inode_out);
 int ext2_write_inode(uint32_t inode_no, const struct ext2_inode *inode);
 int ext2_alloc_inode(uint32_t *inode_no);
+int ext2_free_inode(uint32_t inode_no);
+int ext2_adjust_dirs(uint32_t inode_no, int delta);
 int ext2_alloc_block(uint32_t *block_no);
 int ext2_free_block(uint32_t block_no);
 

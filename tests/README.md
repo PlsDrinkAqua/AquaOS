@@ -33,3 +33,29 @@ getcwd copies its absolute path into a caller-provided buffer. fork and spawn
 inherit it; exec preserves it. The shell's cd and pwd run in the shell process.
 Relative file paths and executable paths resolve against that directory.
 Paths are limited to 255 bytes after prefixing the working directory.
+
+Directory creation is available through `int mkdir(const char *path)` in
+`<unistd.h>` and the standalone `/mkdir` command:
+
+```sh
+mkdir /projects
+cd /projects
+mkdir first second
+cd first
+echo hello > note.txt
+ls
+```
+
+This is a ZenOS one-argument API: new directories use mode 0755. The command
+accepts path arguments only; option parsing and recursive parent creation
+(`-p`) are not implemented. Parents must exist. Existing files/directories
+return EEXIST, missing parents return ENOENT, and non-directory parents return
+ENOTDIR. Directory creation writes real ext2 inodes, '.' and '..' entries,
+parent links, and allocation/directory counters. These metadata writes are
+not a journaled transaction.
+
+The smoke test runs mkdirtest (including directory growth and error cases),
+exercises the command, then shuts down QEMU and runs read-only `e2fsck -fn`
+on the disposable disk. It also reads back a file inside a newly created
+directory with debugfs to verify persistence. `e2fsck` is therefore required
+as well.

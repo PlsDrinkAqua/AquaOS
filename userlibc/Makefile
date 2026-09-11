@@ -34,6 +34,7 @@ unistd/dup.o \
 unistd/exec.o \
 unistd/fork.o \
 unistd/lseek.o \
+unistd/mkdir.o \
 unistd/open.o \
 unistd/pipe.o \
 unistd/read.o \

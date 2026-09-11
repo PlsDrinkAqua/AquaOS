@@ -8,3 +8,6 @@ disk
 /user/ls
 /user/echo
 /user/argtest
+
+/user/mkdir
+/user/mkdirtest

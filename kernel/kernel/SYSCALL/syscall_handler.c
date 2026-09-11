@@ -2,6 +2,7 @@
 #include <libk/stdio.h>
 #include <libk/string.h>
 #include <kernel/elf.h>
+#include <kernel/ext2_api.h>
 #include <kernel/errno.h>
 #include <kernel/fd.h>
 #include <kernel/tty.h>
@@ -35,6 +36,7 @@ enum {
     SYS_PIPE    = 20,
     SYS_CHDIR   = 21,
     SYS_GETCWD  = 22,
+    SYS_MKDIR   = 23,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -164,6 +166,23 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_EXIT:
             task_exit_current((int)regs->ebx, regs);
             break;
+
+        case SYS_MKDIR: {
+            char path[TASK_IMAGE_PATH_BYTES], absolute[TASK_IMAGE_PATH_BYTES];
+            int result;
+            if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
+                result = -K_EFAULT;
+            else {
+                result = task_resolve_path(path, absolute, sizeof(absolute));
+                if (result == 0) {
+                    task_preemption_disable();
+                    result = ext2_mkdir(absolute);
+                    task_preemption_enable();
+                }
+            }
+            regs->eax = (uint32_t)result;
+            break;
+        }
 
         case SYS_CHDIR: {
             char path[TASK_IMAGE_PATH_BYTES];

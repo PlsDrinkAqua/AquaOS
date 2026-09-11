@@ -19,7 +19,7 @@ LIBS:=$(LIBS) ../userlibc/libc.a -nostdlib -lgcc
 # 不要加 -D__is_kernel
 # 不要链接 -lk
 
-TARGETS = shell hello memtest yieldtest sleeptest faulttest tasktest fdtest unixtest cat ls echo argtest
+TARGETS = shell hello memtest yieldtest sleeptest faulttest tasktest fdtest unixtest cat ls echo argtest mkdir mkdirtest
 
 .PHONY: all clean userlibc
 .SUFFIXES: .o .c .S

@@ -39,7 +39,7 @@ sudo cp "$TASKTEST" "$MNT/tasktest"
 sudo cp "$FDTEST" "$MNT/fdtest"
 sudo cp "$UNIXTEST" "$MNT/unixtest"
 
-for program in cat ls echo argtest; do
+for program in cat ls echo argtest mkdir mkdirtest; do
     sudo cp "./user/$program" "$MNT/$program"
 done
 

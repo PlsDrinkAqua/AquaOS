@@ -23,6 +23,7 @@
 #define K_EFBIG   27
 #define K_ESPIPE  29
 #define K_ENOSPC  28
+#define K_EMLINK 31
 #define K_EPIPE   32
 #define K_ENOSYS  38
 #define K_ENOTEMPTY 39

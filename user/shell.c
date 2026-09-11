@@ -178,7 +178,7 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, fdtest, unixtest, cat, ls, cd, pwd, argtest, taskinfo");
+        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, fdtest, unixtest, cat, ls, mkdir, cd, pwd, argtest, taskinfo");
         return;
     }
 

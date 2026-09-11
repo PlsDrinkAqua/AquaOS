@@ -161,6 +161,36 @@ int ext2_alloc_inode(uint32_t *inode_no) {
     return -1;
 }
 
+/* Directory accounting belongs to the group containing the inode. */
+int ext2_adjust_dirs(uint32_t inode_no, int delta) {
+    if (!inode_no || inode_no > sb.s_inodes_count) return -1;
+    uint32_t group = (inode_no - 1) / sb.s_inodes_per_group;
+    int count = (int)gbdt[group].bg_used_dirs_count + delta;
+    if (count < 0 || count > 65535) return -1;
+    gbdt[group].bg_used_dirs_count = count;
+    if (write_gbdt() < 0) {
+        gbdt[group].bg_used_dirs_count -= delta;
+        return -1;
+    }
+    return 0;
+}
+
+int ext2_free_inode(uint32_t inode_no) {
+    if (!inode_no || inode_no > sb.s_inodes_count) return -1;
+    uint32_t group = (inode_no - 1) / sb.s_inodes_per_group;
+    uint32_t bit = (inode_no - 1) % sb.s_inodes_per_group;
+    uint8_t *bitmap = kmalloc(1024U << sb.s_log_block_size);
+    if (!bitmap) return -1;
+    if (ext2_read_block(gbdt[group].bg_inode_bitmap, bitmap) < 0 ||
+        !(bitmap[bit / 8] & (1U << (bit % 8)))) { kfree(bitmap); return -1; }
+    bitmap[bit / 8] &= ~(1U << (bit % 8));
+    if (ext2_write_block(gbdt[group].bg_inode_bitmap, bitmap) < 0) { kfree(bitmap); return -1; }
+    kfree(bitmap);
+    gbdt[group].bg_free_inodes_count++;
+    sb.s_free_inodes_count++;
+    return write_gbdt() < 0 || write_sb() < 0 ? -1 : 0;
+}
+
 int ext2_alloc_block(uint32_t *block_no) {
     uint32_t block_size = 1024U << sb.s_log_block_size;
     uint8_t *zero;
