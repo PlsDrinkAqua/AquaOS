@@ -5,8 +5,10 @@
 #include <libk/string.h>
 
 #include <kernel/elf.h>
+#include <kernel/ext2_api.h>
 #include <kernel/errno.h>
 #include <kernel/kha.h>
+#include <kernel/kmalloc.h>
 #include <kernel/pmm.h>
 #include <kernel/task.h>
 #include <kernel/timer.h>
@@ -86,6 +88,53 @@ static void task_copy_path(char *dest, size_t dest_size, const char *path) {
         i++;
     }
     dest[i] = '\0';
+}
+
+/* Keep dot components for the filesystem to validate before canonicalizing. */
+int task_resolve_path(const char *path, char *out, size_t size) {
+    if (!path || !*path) return -K_ENOENT;
+    const char *cwd = current_task && current_task->cwd[0] ? current_task->cwd : "/";
+    size_t prefix = *path == '/' ? 0 : kstrlen(cwd);
+    size_t length = kstrlen(path);
+    if (prefix + (prefix ? 1 : 0) + length + 1 > size) return -K_ENAMETOOLONG;
+    if (prefix) {
+        kmemcpy(out, cwd, prefix);
+        out[prefix++] = '/';
+    }
+    kmemcpy(out + prefix, path, length + 1);
+    return 0;
+}
+
+int task_chdir(const char *path) {
+    char absolute[TASK_IMAGE_PATH_BYTES];
+    ext2_file_t file;
+    int result = task_resolve_path(path, absolute, sizeof(absolute));
+    if (result < 0) return result;
+    result = ext2_file_open(absolute, 0, &file);
+    if (result < 0) return result;
+    if (!ext2_file_is_dir(&file)) return -K_ENOTDIR;
+
+    char *p = absolute;
+    char *out = current_task->cwd;
+    size_t used = 1;
+    out[0] = '/';
+    while (*p) {
+        while (*p == '/') p++;
+        const char *start = p;
+        while (*p && *p != '/') p++;
+        size_t length = p - start;
+        if (!length || (length == 1 && start[0] == '.')) continue;
+        if (length == 2 && start[0] == '.' && start[1] == '.') {
+            while (used > 1 && out[used - 1] != '/') used--;
+            if (used > 1) used--;
+        } else {
+            if (used > 1) out[used++] = '/';
+            kmemcpy(out + used, start, length);
+            used += length;
+        }
+    }
+    out[used] = 0;
+    return 0;
 }
 
 static void task_clear_wait_state(task_t *task) {
@@ -224,7 +273,46 @@ static int task_schedule(interrupt_frame_t *regs) {
     return 1;
 }
 
-static int task_prepare_user_stack(task_t *task) {
+#define EXEC_ARG_MAX 32
+#define EXEC_ARG_BYTES 1024
+
+typedef struct {
+    unsigned count;
+    char *values[EXEC_ARG_MAX + 1];
+    char strings[EXEC_ARG_BYTES];
+} exec_args_t;
+
+/* Copy everything before switching away from the caller's address space. */
+static int task_copy_args(exec_args_t *args, const char *const *argv) {
+    unsigned used = 0;
+    args->count = 0;
+    if (!argv) return 0;
+    for (unsigned i = 0; i <= EXEC_ARG_MAX; i++) {
+        const char *value;
+        uintptr_t slot = (uintptr_t)argv + i * sizeof(value);
+        if (slot < (uintptr_t)argv ||
+            copy_from_user(&value, (const void *)slot, sizeof(value)) < 0)
+            return -K_EFAULT;
+        if (!value) return 0;
+        if (i == EXEC_ARG_MAX) return -K_E2BIG;
+        args->values[i] = args->strings + used;
+        for (unsigned j = 0;; j++) {
+            char c;
+            if (used == EXEC_ARG_BYTES) return -K_E2BIG;
+            uintptr_t address = (uintptr_t)value + j;
+            if (address < (uintptr_t)value ||
+                copy_from_user(&c, (const void *)address, 1) < 0)
+                return -K_EFAULT;
+            args->strings[used++] = c;
+            if (!c) break;
+        }
+        args->count++;
+    }
+    return -K_E2BIG;
+}
+
+static int task_prepare_user_stack(task_t *task, const char *path,
+                                   const exec_args_t *args) {
     uintptr_t stack_page = USER_STACK_TOP - PAGE_SIZE;
 
     if (!vmm_translate(stack_page)) {
@@ -245,11 +333,28 @@ static int task_prepare_user_stack(task_t *task) {
     }
 
     kmemset((void *)stack_page, 0, PAGE_SIZE);
-    task->user_stack_top = USER_STACK_TOP;
+    unsigned argc = args ? args->count : 1;
+    uint32_t pointers[EXEC_ARG_MAX];
+    uintptr_t sp = USER_STACK_TOP;
+    for (unsigned i = 0; i < argc; i++) {
+        const char *value = args ? args->values[i] : path;
+        size_t length = kstrlen(value) + 1;
+        sp -= length;
+        kmemcpy((void *)sp, value, length);
+        pointers[i] = sp;
+    }
+    /* Entry ABI: argc, argv pointers, NULL; _start aligns before calling C. */
+    sp = (sp - (argc + 2) * sizeof(uint32_t)) & ~15U;
+    uint32_t *words = (uint32_t *)sp;
+    words[0] = argc;
+    for (unsigned i = 0; i < argc; i++) words[i + 1] = pointers[i];
+    words[argc + 1] = 0;
+    task->user_stack_top = sp;
     return 0;
 }
 
-static int task_load_image_into_space(task_t *task, const char *path, page_directory_t *pd) {
+static int task_load_image_into_space(task_t *task, const char *path, page_directory_t *pd,
+                                      const exec_args_t *args) {
     elf_load_result_t res;
     char image_path[sizeof(task->image_path)];
     page_directory_t *old_pd;
@@ -258,7 +363,7 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
         return -1;
     }
 
-    task_copy_path(image_path, sizeof(image_path), path);
+    if (task_resolve_path(path, image_path, sizeof(image_path)) < 0) return -1;
 
     task_preemption_disable();
     if (elf_load_from_file_into_address_space(image_path, pd, &res) < 0) {
@@ -268,7 +373,7 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
 
     old_pd = vmm_current_address_space();
     vmm_switch_address_space(pd);
-    if (task_prepare_user_stack(task) < 0) {
+    if (task_prepare_user_stack(task, image_path, args) < 0) {
         vmm_switch_address_space(old_pd);
         task_preemption_enable();
         return -1;
@@ -304,7 +409,7 @@ static int task_create_and_load_image(task_t *task, const char *path) {
         return -1;
     }
 
-    if (task_load_image_into_space(task, path, pd) < 0) {
+    if (task_load_image_into_space(task, path, pd, NULL) < 0) {
         vmm_destroy_address_space(pd);
         task_free_kernel_stack(task);
         return -1;
@@ -320,6 +425,7 @@ void tasking_init(void) {
     task_table[0].state = TASK_UNUSED;
     task_table[0].user_stack_top = USER_STACK_TOP;
     fd_table_init(&task_table[0]);
+    kstrcpy(task_table[0].cwd, "/");
     current_task = &task_table[0];
     preempt_disable_depth = 0;
 }
@@ -356,7 +462,7 @@ int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out) 
     return 0;
 }
 
-int task_exec_current(const char *path, interrupt_frame_t *regs) {
+int task_exec_current(const char *path, const char *const *argv, interrupt_frame_t *regs) {
     page_directory_t *old_pd;
     page_directory_t *new_pd;
 
@@ -364,15 +470,23 @@ int task_exec_current(const char *path, interrupt_frame_t *regs) {
         return -1;
     }
 
+    exec_args_t *args = kmalloc(sizeof(*args));
+    if (!args) return -K_ENOMEM;
+    int result = task_copy_args(args, argv);
+    if (result < 0) { kfree(args); return result; }
+
     old_pd = current_task->address_space;
     new_pd = vmm_create_address_space();
     if (!new_pd) {
-        return -1;
+        kfree(args);
+        return -K_ENOMEM;
     }
 
-    if (task_load_image_into_space(current_task, path, new_pd) < 0) {
+    result = task_load_image_into_space(current_task, path, new_pd, argv ? args : NULL);
+    kfree(args);
+    if (result < 0) {
         vmm_destroy_address_space(new_pd);
-        return -1;
+        return -K_ENOENT;
     }
 
     current_task->address_space = new_pd;
@@ -413,6 +527,7 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     parent->saved_regs = *regs;
     parent->saved_regs.eax = child->pid;
 
+    kmemcpy(child->cwd, parent->cwd, sizeof(child->cwd));
     child->parent_pid = parent->pid;
 
     if (task_create_and_load_image(child, image_path) < 0) {
@@ -447,6 +562,7 @@ int task_fork_current(interrupt_frame_t *regs) {
 
     child->address_space = vmm_clone_address_space(parent->address_space);
     if (!child->address_space) goto fail;
+    kmemcpy(child->cwd, parent->cwd, sizeof(child->cwd));
     child->parent_pid = parent->pid;
     child->entry = parent->entry;
     child->user_stack_top = parent->user_stack_top;

@@ -2,6 +2,6 @@
 #include <zenos/syscall.h>
 #include <zenos/sysret.h>
 
-int exec(const char *path) {
-    return zenos_sysret(zenos_syscall1(SYS_EXEC, (int)path));
+int exec(const char *path, const char *const argv[]) {
+    return zenos_sysret(zenos_syscall3(SYS_EXEC, (int)path, (int)argv, 0));
 }

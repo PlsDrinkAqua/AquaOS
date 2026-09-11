@@ -33,6 +33,8 @@ enum {
     SYS_DUP     = 18,
     SYS_DUP2    = 19,
     SYS_PIPE    = 20,
+    SYS_CHDIR   = 21,
+    SYS_GETCWD  = 22,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -163,13 +165,33 @@ void syscall_handler(interrupt_frame_t *regs)
             task_exit_current((int)regs->ebx, regs);
             break;
 
+        case SYS_CHDIR: {
+            char path[TASK_IMAGE_PATH_BYTES];
+            if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
+                regs->eax = (uint32_t)-K_EFAULT;
+            else regs->eax = (uint32_t)task_chdir(path);
+            break;
+        }
+
+        case SYS_GETCWD: {
+            const char *cwd = task_current()->cwd;
+            size_t length = kstrlen(cwd) + 1;
+            if (regs->ecx < length) regs->eax = (uint32_t)-K_ERANGE;
+            else if (copy_to_user((void *)regs->ebx, cwd, length) < 0)
+                regs->eax = (uint32_t)-K_EFAULT;
+            else regs->eax = 0;
+            break;
+        }
+
         case SYS_EXEC: {
             char path[TASK_IMAGE_PATH_BYTES];
 
             if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
                 regs->eax = (uint32_t)-K_EFAULT;
-            else if (task_exec_current(path, regs) < 0)
-                regs->eax = (uint32_t)-K_ENOENT;
+            else {
+                int result = task_exec_current(path, (const char *const *)regs->ecx, regs);
+                if (result < 0) regs->eax = (uint32_t)result;
+            }
             break;
         }
 

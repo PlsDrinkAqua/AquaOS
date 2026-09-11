@@ -9,7 +9,7 @@ static void fail(const char *message, int status) {
     exit(status);
 }
 
-void _start(void) {
+int main(void) {
     char buf[256];
     int pair[2];
     int value = 41;
@@ -71,7 +71,7 @@ void _start(void) {
     if (pid < 0) fail("exec fork", 18);
     if (pid == 0) {
         close(pair[0]); dup2(pair[1], 1); close(pair[1]);
-        exec("/hello"); exit(19);
+        exec("/hello", NULL); exit(19);
     }
     close(pair[1]);
     if (read(pair[0], buf, sizeof(buf)) <= 0) fail("exec descriptor inheritance", 20);

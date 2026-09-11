@@ -113,13 +113,16 @@ int fd_open(const char *path, int flags) {
     open_file_t *file;
     int fd, result;
     if (!task || !path || (flags & O_ACCMODE) == O_ACCMODE) return -K_EINVAL;
+    char absolute[TASK_IMAGE_PATH_BYTES];
+    result = task_resolve_path(path, absolute, sizeof(absolute));
+    if (result < 0) return result;
     fd = fd_find_free(task, 3);
     if (fd < 0) return -K_EMFILE;
     file = open_file_alloc(FD_EXT2);
     if (!file) return -K_ENFILE;
     file->flags = flags;
     task_preemption_disable();
-    result = ext2_file_open(path, flags, &file->object.ext2);
+    result = ext2_file_open(absolute, flags, &file->object.ext2);
     task_preemption_enable();
     if (result < 0) { open_file_put(file); return result; }
     task->fds[fd].type = FD_EXT2;

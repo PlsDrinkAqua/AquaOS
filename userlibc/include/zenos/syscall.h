@@ -23,6 +23,8 @@ enum {
     SYS_DUP     = 18,
     SYS_DUP2    = 19,
     SYS_PIPE    = 20,
+    SYS_CHDIR   = 21,
+    SYS_GETCWD  = 22,
 };
 
 #ifdef __cplusplus

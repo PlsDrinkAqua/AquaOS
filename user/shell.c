@@ -26,67 +26,6 @@ static void write_str(const char *s) {
     write(1, s, (unsigned)(p - s));
 }
 
-static const char *skip_spaces(const char *s) {
-    while (*s == ' ') s++;
-    return s;
-}
-
-static void cat_file(const char *path) {
-    char buf[128];
-    int fd = open(path, O_RDONLY);
-
-    if (fd < 0) {
-        printf("cat: cannot open %s\n", path);
-        return;
-    }
-
-    for (;;) {
-        ssize_t n = read(fd, buf, sizeof(buf));
-        if (n < 0) {
-            printf("cat: cannot read %s\n", path);
-            break;
-        }
-        if (n == 0) break;
-        if (write(1, buf, (size_t)n) != n) break;
-    }
-    close(fd);
-}
-
-static void copy_stream(int input) {
-    char buf[128];
-    for (;;) {
-        ssize_t n = read(input, buf, sizeof(buf));
-        if (n <= 0) return;
-        size_t done = 0;
-        while (done < (size_t)n) {
-            ssize_t written = write(1, buf + done, (size_t)n - done);
-            if (written <= 0) return;
-            done += (size_t)written;
-        }
-    }
-}
-
-static void list_dir(const char *path) {
-    char name[256];
-    int fd = open(path, O_RDONLY);
-
-    if (fd < 0) {
-        printf("ls: cannot open %s\n", path);
-        return;
-    }
-
-    for (;;) {
-        int result = readdir(fd, name, sizeof(name));
-        if (result < 0) {
-            printf("ls: cannot read %s\n", path);
-            break;
-        }
-        if (result == 0) break;
-        puts(name);
-    }
-    close(fd);
-}
-
 static int has_shell_operator(const char *line) {
     while (*line) {
         if (*line == '|' || *line == '<' || *line == '>') return 1;
@@ -146,22 +85,33 @@ static int parse_pipeline(const char *line, shell_stage_t stages[], int *count) 
     return 0;
 }
 
-static void execute_stage(const char *command) {
+/* Whitespace-separated arguments; quoting and escapes are not supported yet. */
+static void execute_stage(char *command) {
+    const char *argv[33];
     char path[LINE_MAX];
-    if (strcmp(command, "cat") == 0) copy_stream(0);
-    else if (strncmp(command, "cat ", 4) == 0) cat_file(skip_spaces(command + 4));
-    else if (strcmp(command, "ls") == 0) list_dir("/");
-    else if (strncmp(command, "ls ", 3) == 0) list_dir(skip_spaces(command + 3));
-    else if (strncmp(command, "echo ", 5) == 0) puts(command + 5);
-    else {
-        const char *name = command;
-        size_t i = 0;
-        if (*name != '/') path[i++] = '/';
-        while (*name && *name != ' ' && i + 1 < sizeof(path)) path[i++] = *name++;
-        path[i] = '\0';
-        exec(path);
-        printf("shell: cannot execute %s\n", path);
+    unsigned argc = 0;
+    char *p = command;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        if (argc == 32) { puts("shell: too many arguments"); exit(1); }
+        argv[argc++] = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        if (*p) *p++ = '\0';
     }
+    argv[argc] = NULL;
+    if (!argc) exit(0);
+    unsigned i = 0;
+    const char *name = argv[0];
+    int has_slash = 0;
+    for (const char *scan = name; *scan; scan++) if (*scan == '/') has_slash = 1;
+    if (!has_slash) path[i++] = '/';
+    while (*name && i + 1 < sizeof(path)) path[i++] = *name++;
+    if (*name) { puts("shell: program path too long"); exit(1); }
+    path[i] = '\0';
+    exec(path, argv);
+    printf("shell: cannot execute %s\n", path);
+    exit(127);
 }
 
 static void run_pipeline(const char *line) {
@@ -214,8 +164,21 @@ static void run_command(const char *line) {
         return;
     }
 
+    if (strcmp(line, "cd") == 0 || strncmp(line, "cd ", 3) == 0) {
+        const char *path = line + 2;
+        while (*path == ' ') path++;
+        if (chdir(*path ? path : "/") < 0) printf("cd: cannot change directory to %s\n", path);
+        return;
+    }
+    if (strcmp(line, "pwd") == 0) {
+        char path[256];
+        if (getcwd(path, sizeof(path))) puts(path);
+        else puts("pwd: cannot read working directory");
+        return;
+    }
+
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, fdtest, unixtest, cat, ls, taskinfo");
+        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, fdtest, unixtest, cat, ls, cd, pwd, argtest, taskinfo");
         return;
     }
 
@@ -312,40 +275,16 @@ static void run_command(const char *line) {
         return;
     }
 
-    if (strncmp(line, "cat ", 4) == 0) {
-        const char *path = skip_spaces(line + 4);
-        if (*path == '\0') puts("usage: cat <path>");
-        else cat_file(path);
-        return;
-    }
-
-    if (strcmp(line, "ls") == 0) {
-        list_dir("/");
-        return;
-    }
-
-    if (strncmp(line, "ls ", 3) == 0) {
-        const char *path = skip_spaces(line + 3);
-        if (*path == '\0') list_dir("/");
-        else list_dir(path);
-        return;
-    }
-
-    if (strncmp(line, "echo ", 5) == 0) {
-        puts(line + 5);
-        return;
-    }
-
-    printf("unknown command: %s\n", line);
+    run_pipeline(line);
 }
 
-void _start(void) {
+int main(void) {
     char line[LINE_MAX];
 
-    printf("ZenOS shell at %x\n", 0x08048000);
+    printf("AquaOS shell at %x\n", 0x08048000);
 
     for (;;) {
-        write_str("ZenOS> ");
+        write_str("AquaOS> ");
         zenos_readline(line, sizeof(line));
         run_command(line);
     }

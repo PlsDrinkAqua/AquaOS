@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void _start(void) {
+int main(void) {
     puts("hello from /hello");
     exit(0);
 }

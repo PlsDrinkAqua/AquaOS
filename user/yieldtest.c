@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-void _start(void) {
+int main(void) {
     for (int i = 0; i < 5; i++) {
         printf("yieldtest step %d\n", i);
         yield();

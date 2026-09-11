@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-void _start(void) {
+int main(void) {
     volatile unsigned int *invalid = (volatile unsigned int *)0;
 
     if (write(1, (const void *)invalid, 4) != -1) {

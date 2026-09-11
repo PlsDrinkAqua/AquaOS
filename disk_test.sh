@@ -3,7 +3,7 @@ set -e
 
 IMG=ext2_hda.img
 MNT=/mnt/ext2_test
-SHELL=./user/shell
+SHELL_PROGRAM=./user/shell
 HELLO=./user/hello
 MEMTEST=./user/memtest
 SLEEPTEST=./user/sleeptest
@@ -29,7 +29,7 @@ echo "hello, ZenOS" | sudo tee "$MNT/hello.txt" > /dev/null
 sudo mkdir -p "$MNT/subdir"
 echo "foo" | sudo tee "$MNT/subdir/bar.dat" > /dev/null
 
-sudo cp "$SHELL" "$MNT/shell"
+sudo cp "$SHELL_PROGRAM" "$MNT/shell"
 sudo cp "$HELLO" "$MNT/hello"
 sudo cp "$MEMTEST" "$MNT/memtest"
 sudo cp "$SLEEPTEST" "$MNT/sleeptest"
@@ -38,6 +38,10 @@ sudo cp "$FAULTTEST" "$MNT/faulttest"
 sudo cp "$TASKTEST" "$MNT/tasktest"
 sudo cp "$FDTEST" "$MNT/fdtest"
 sudo cp "$UNIXTEST" "$MNT/unixtest"
+
+for program in cat ls echo argtest; do
+    sudo cp "./user/$program" "$MNT/$program"
+done
 
 # 确保写入磁盘
 sync

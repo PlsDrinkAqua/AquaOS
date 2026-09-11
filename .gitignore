@@ -3,3 +3,8 @@ isodir
 sysroot
 *.img
 disk
+
+/user/cat
+/user/ls
+/user/echo
+/user/argtest

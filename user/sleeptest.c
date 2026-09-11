@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-void _start(void) {
+int main(void) {
     puts("sleeptest: before sleep");
     sleep(100);
     puts("sleeptest: after 100 ticks");

@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <zenos/task.h>
 
-void _start(void) {
+int main(void) {
     char *a;
     char *b;
     char *c;

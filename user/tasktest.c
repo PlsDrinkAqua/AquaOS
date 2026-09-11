@@ -4,7 +4,7 @@
 
 #define ITERATIONS 24
 
-void _start(void) {
+int main(void) {
     for (int i = 0; i < ITERATIONS; i++) {
         if (spawn("/does-not-exist") != -1) {
             puts("tasktest: failed spawn unexpectedly succeeded");

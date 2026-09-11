@@ -28,6 +28,7 @@ string/strcmp.o \
 string/strncmp.o \
 string/strlen.o \
 syscall/syscall.o \
+unistd/chdir.o \
 unistd/close.o \
 unistd/dup.o \
 unistd/exec.o \
@@ -50,10 +51,13 @@ zenos/terminal.o
 .PHONY: all clean
 .SUFFIXES: .o .c
 
-all: $(TARGET)
+all: $(TARGET) crt0.o
 
 $(TARGET): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
+
+crt0.o: crt0.S
+	$(CC) -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)

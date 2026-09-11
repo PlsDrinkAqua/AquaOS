@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-void _start(void) {
+int main(void) {
     char buf[16];
     char name[256];
     int files[13];

@@ -8,7 +8,7 @@
 
 #define USER_STACK_TOP 0xBFFFE000U
 #define TASK_KERNEL_STACK_BYTES 4096U
-#define TASK_IMAGE_PATH_BYTES 64U
+#define TASK_IMAGE_PATH_BYTES 256U
 #define TASK_MAX 16
 
 typedef enum {
@@ -23,6 +23,7 @@ typedef enum {
 typedef struct task {
     uint32_t pid;
     task_state_t state;
+    char cwd[TASK_IMAGE_PATH_BYTES];
     char image_path[TASK_IMAGE_PATH_BYTES];
     uint32_t entry;
     uint32_t user_stack_top;
@@ -46,10 +47,12 @@ typedef struct task {
     int exit_status;
 } task_t;
 
+int task_resolve_path(const char *path, char *out, size_t size);
+int task_chdir(const char *path);
 void tasking_init(void);
 task_t *task_current(void);
 int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out);
-int task_exec_current(const char *path, interrupt_frame_t *regs);
+int task_exec_current(const char *path, const char *const *argv, interrupt_frame_t *regs);
 int task_spawn_current(const char *path, interrupt_frame_t *regs);
 int task_fork_current(interrupt_frame_t *regs);
 void task_yield_current(interrupt_frame_t *regs);
