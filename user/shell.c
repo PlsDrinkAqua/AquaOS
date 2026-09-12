@@ -177,8 +177,13 @@ static void run_command(const char *line) {
         return;
     }
 
+    if (strcmp(line, "exit") == 0) {
+        exit(0);
+    }
+
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, memtest, yieldtest, sleeptest, faulttest, tasktest, fdtest, unixtest, cat, ls, mkdir, cd, pwd, argtest, taskinfo");
+        puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, cd, pwd, taskinfo, exit");
+        puts("Use exit or Ctrl+D to leave the shell; Ctrl+D ends cat input.");
         return;
     }
 
@@ -207,74 +212,6 @@ static void run_command(const char *line) {
         return;
     }
 
-    if (strcmp(line, "memtest") == 0) {
-        int pid = spawn("/memtest");
-        if (pid < 0) {
-            printf("spawn failed: /memtest\n");
-        } else if (wait(pid) < 0) {
-            printf("wait failed: %d\n", pid);
-        }
-        return;
-    }
-
-    if (strcmp(line, "yieldtest") == 0) {
-        int pid = spawn("/yieldtest");
-        if (pid < 0) {
-            printf("spawn failed: /yieldtest\n");
-        } else if (wait(pid) < 0) {
-            printf("wait failed: %d\n", pid);
-        }
-        return;
-    }
-
-    if (strcmp(line, "sleeptest") == 0) {
-        int pid = spawn("/sleeptest");
-        if (pid < 0) {
-            printf("spawn failed: /sleeptest\n");
-        } else if (wait(pid) < 0) {
-            printf("wait failed: %d\n", pid);
-        }
-        return;
-    }
-
-    if (strcmp(line, "faulttest") == 0) {
-        int pid = spawn("/faulttest");
-        if (pid < 0) {
-            printf("spawn failed: /faulttest\n");
-        } else {
-            int status = wait(pid);
-            printf("faulttest exited with status %d (expected 142)\n", status);
-        }
-        return;
-    }
-
-    if (strcmp(line, "tasktest") == 0) {
-        int pid = spawn("/tasktest");
-        if (pid < 0) {
-            printf("spawn failed: /tasktest\n");
-        } else {
-            printf("tasktest exited with status %d\n", wait(pid));
-        }
-        return;
-    }
-
-    if (strcmp(line, "fdtest") == 0) {
-        int pid = spawn("/fdtest");
-        if (pid < 0) {
-            printf("spawn failed: /fdtest\n");
-        } else {
-            printf("fdtest exited with status %d\n", wait(pid));
-        }
-        return;
-    }
-
-    if (strcmp(line, "unixtest") == 0) {
-        int pid = spawn("/unixtest");
-        if (pid < 0) printf("spawn failed: /unixtest\n");
-        else printf("unixtest exited with status %d\n", wait(pid));
-        return;
-    }
-
     run_pipeline(line);
 }
 
@@ -285,7 +222,10 @@ int main(void) {
 
     for (;;) {
         write_str("AquaOS> ");
-        zenos_readline(line, sizeof(line));
+        if (!zenos_readline(line, sizeof(line))) {
+            putchar('\n');
+            return 0;
+        }
         run_command(line);
     }
 

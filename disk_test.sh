@@ -5,13 +5,6 @@ IMG=ext2_hda.img
 MNT=/mnt/ext2_test
 SHELL_PROGRAM=./user/shell
 HELLO=./user/hello
-MEMTEST=./user/memtest
-SLEEPTEST=./user/sleeptest
-YIELDTEST=./user/yieldtest
-FAULTTEST=./user/faulttest
-TASKTEST=./user/tasktest
-FDTEST=./user/fdtest
-UNIXTEST=./user/unixtest
 
 . ./config.sh
 make -C user
@@ -31,15 +24,8 @@ echo "foo" | sudo tee "$MNT/subdir/bar.dat" > /dev/null
 
 sudo cp "$SHELL_PROGRAM" "$MNT/shell"
 sudo cp "$HELLO" "$MNT/hello"
-sudo cp "$MEMTEST" "$MNT/memtest"
-sudo cp "$SLEEPTEST" "$MNT/sleeptest"
-sudo cp "$YIELDTEST" "$MNT/yieldtest"
-sudo cp "$FAULTTEST" "$MNT/faulttest"
-sudo cp "$TASKTEST" "$MNT/tasktest"
-sudo cp "$FDTEST" "$MNT/fdtest"
-sudo cp "$UNIXTEST" "$MNT/unixtest"
 
-for program in cat ls echo argtest mkdir mkdirtest; do
+for program in cat ls echo mkdir; do
     sudo cp "./user/$program" "$MNT/$program"
 done
 

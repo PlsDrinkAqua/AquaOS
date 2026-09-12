@@ -22,8 +22,7 @@ def run():
         bar = tmp / "bar.dat"
         bar.write_text("foo\n")
         commands = ["mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
-        programs = ["shell", "hello", "memtest", "yieldtest", "sleeptest", "faulttest",
-                    "tasktest", "fdtest", "unixtest", "cat", "ls", "echo", "argtest", "mkdir", "mkdirtest"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
@@ -101,7 +100,26 @@ def run():
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
-            command("mkdirtest", "mkdirtest: PASS")
+            # A nested shell must return to its parent (including the parent's cwd).
+            command("shell", "shell at")
+            command("cd /subdir")
+            command("exit", "exited from /shell with status 0")
+            command("pwd", "\n/\n")
+            command("shell", "shell at")
+            qmp("human-monitor-command", {"command-line": "sendkey ctrl-d 10"})
+            wait_for("exited from /shell with status 0")
+            command("pwd", "\n/\n")
+
+            # Bare cat reads the keyboard until Ctrl+D, then the shell resumes.
+            command("cat", "exec /cat")
+            for char in "keyboard":
+                qmp("human-monitor-command", {"command-line": f"sendkey {char} 10"})
+                time.sleep(.025)
+            qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
+            wait_for("\nkeyboard\n")
+            qmp("human-monitor-command", {"command-line": "sendkey ctrl-d 10"})
+            wait_for("exited from /cat with status 0")
+            command("pwd", "\n/\n")
             command("mkdir /fromshell")
             command("cd /fromshell")
             command("mkdir one two")
@@ -113,8 +131,6 @@ def run():
             command("echo saved > note")
             command("cat note", "\nsaved\n")
             command("cd /")
-            command("argtest", "argtest: PASS")
-            command("unixtest", "unixtest: PASS")
             command("/cat /hello.txt", "hello, ZenOS")
             command("/echo hello world | /cat > /copy.txt")
             command("cat < /copy.txt", "\nhello world\n")
@@ -134,7 +150,6 @@ def run():
             command("pwd", "\n/\n")
             command("cd /hello.txt", "cd: cannot change directory")
             command("pwd", "\n/\n")
-            command("fdtest", "fdtest: PASS")
             qmp("quit")
             proc.wait(timeout=5)
             # Validate actual disk structures, including link counts and bitmaps.

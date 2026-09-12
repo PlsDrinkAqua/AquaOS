@@ -7,7 +7,5 @@ disk
 /user/cat
 /user/ls
 /user/echo
-/user/argtest
 
 /user/mkdir
-/user/mkdirtest

@@ -147,11 +147,15 @@ void syscall_handler(interrupt_frame_t *regs)
                     break;
                 }
 
+                if (c == 4) break; /* Consume terminal EOF without copying it. */
+
                 if (copy_to_user(buf + read, &c, 1) < 0) {
                     regs->eax = (uint32_t)-K_EFAULT;
                     break;
                 }
                 read++;
+                /* Match blocked terminal reads; leave subsequent EOF queued. */
+                break;
             }
 
             regs->eax = read;

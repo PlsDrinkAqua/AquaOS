@@ -2,12 +2,5 @@
 *.kernel
 *.o
 /hello
-/memtest
 /shell
-/sleeptest
 /userprog
-/yieldtest
-/faulttest
-/tasktest
-/fdtest
-/unixtest

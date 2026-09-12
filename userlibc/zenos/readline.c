@@ -12,8 +12,10 @@ char *zenos_readline(char *buf, size_t size) {
     for (;;) {
         char c;
 
-        if (read(0, &c, 1) != 1) {
-            continue;
+        ssize_t n = read(0, &c, 1);
+        if (n <= 0) {
+            buf[len] = '\0';
+            return n == 0 && len > 0 ? buf : NULL;
         }
 
         if (c == '\n') {

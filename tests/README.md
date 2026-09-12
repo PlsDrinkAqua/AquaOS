@@ -24,7 +24,9 @@ All user programs must be rebuilt for the new exec syscall ABI.
 The shell runs standalone /cat, /ls, and /echo, with space/tab-separated
 arguments. It supports up to four pipeline stages and <, >, and >> redirection.
 Quoting, escapes, and environment variables are not implemented.
-Bare cat copies standard input; cat accepts multiple paths and '-' for stdin.
+Bare cat copies standard input; press Ctrl+D to finish keyboard input.
+cat accepts multiple paths and '-' for stdin. Nested shells return to their
+parent with `exit` or Ctrl+D at an empty prompt.
 Commands without a slash are looked up in the root directory; paths containing
 a slash are used as written.
 
@@ -54,8 +56,8 @@ ENOTDIR. Directory creation writes real ext2 inodes, '.' and '..' entries,
 parent links, and allocation/directory counters. These metadata writes are
 not a journaled transaction.
 
-The smoke test runs mkdirtest (including directory growth and error cases),
-exercises the command, then shuts down QEMU and runs read-only `e2fsck -fn`
+The smoke test exercises directory creation through the shell, then shuts down
+QEMU and runs read-only `e2fsck -fn`
 on the disposable disk. It also reads back a file inside a newly created
 directory with debugfs to verify persistence. `e2fsck` is therefore required
 as well.

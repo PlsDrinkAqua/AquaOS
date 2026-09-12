@@ -626,7 +626,9 @@ int task_complete_keyboard_read(char c) {
             page_directory_t *old_pd = vmm_current_address_space();
 
             vmm_switch_address_space(task->address_space);
-            if (copy_to_user((void *)task->keyboard_read_buf, &c, 1) < 0) {
+            if (c == 4) {
+                task->saved_regs.eax = 0;
+            } else if (copy_to_user((void *)task->keyboard_read_buf, &c, 1) < 0) {
                 task->saved_regs.eax = (uint32_t)-K_EFAULT;
             } else {
                 task->saved_regs.eax = 1;

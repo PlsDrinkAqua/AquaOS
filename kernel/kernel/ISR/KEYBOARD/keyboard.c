@@ -34,6 +34,7 @@ static const char scancode_to_ascii_shift[128] = {
 
 // Track Shift state
 static bool shift_down = false;
+static bool ctrl_down = false;
 
 static char key_buffer[KEYBOARD_BUFFER_SIZE];
 static unsigned int key_read_index;
@@ -68,6 +69,11 @@ int keyboard_getchar(void) {
 void keyboard_isr() {
     unsigned char scancode = inb(KEYBOARD_DATA_PORT);
 
+    if (scancode == 0x1D || scancode == 0x9D) {
+        ctrl_down = scancode == 0x1D;
+        return;
+    }
+
     // key-release? (bit7 set)
     if (scancode & 0x80) {
         if (scancode == 0xAA || scancode == 0xB6) {
@@ -88,6 +94,8 @@ void keyboard_isr() {
     char ascii = shift_down
         ? scancode_to_ascii_shift[scancode]
         : scancode_to_ascii[scancode];
+
+    if (ctrl_down && scancode == 0x20) ascii = 4; /* Ctrl+D: terminal EOF. */
 
     if (ascii) {
         if (!task_complete_keyboard_read(ascii)) {
