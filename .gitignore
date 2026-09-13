@@ -9,3 +9,7 @@ disk
 /user/echo
 
 /user/mkdir
+
+/user/rm
+/user/rmdir
+/user/fscheck

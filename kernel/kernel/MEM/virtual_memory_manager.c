@@ -146,6 +146,9 @@ void vmm_switch_address_space(page_directory_t *pd) {
         return;
     }
 
+    /* Heap growth can create a new kernel PDE in any process. Carry those
+     * shared mappings across every switch, including child exit to parent. */
+    vmm_sync_kernel_mappings(pd);
     current_pd = pd;
     vmm_refresh_ref_tables();
     vmm_load_cr3(pd);

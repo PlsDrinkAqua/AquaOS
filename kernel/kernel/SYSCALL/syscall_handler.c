@@ -37,6 +37,8 @@ enum {
     SYS_CHDIR   = 21,
     SYS_GETCWD  = 22,
     SYS_MKDIR   = 23,
+    SYS_UNLINK  = 24,
+    SYS_RMDIR   = 25,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -171,6 +173,8 @@ void syscall_handler(interrupt_frame_t *regs)
             task_exit_current((int)regs->ebx, regs);
             break;
 
+        case SYS_UNLINK:
+        case SYS_RMDIR:
         case SYS_MKDIR: {
             char path[TASK_IMAGE_PATH_BYTES], absolute[TASK_IMAGE_PATH_BYTES];
             int result;
@@ -180,7 +184,8 @@ void syscall_handler(interrupt_frame_t *regs)
                 result = task_resolve_path(path, absolute, sizeof(absolute));
                 if (result == 0) {
                     task_preemption_disable();
-                    result = ext2_mkdir(absolute);
+                    result = regs->eax == SYS_MKDIR ? ext2_mkdir(absolute) :
+                        ext2_remove(absolute, regs->eax == SYS_RMDIR);
                     task_preemption_enable();
                 }
             }

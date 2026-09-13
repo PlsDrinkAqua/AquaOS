@@ -25,7 +25,7 @@ echo "foo" | sudo tee "$MNT/subdir/bar.dat" > /dev/null
 sudo cp "$SHELL_PROGRAM" "$MNT/shell"
 sudo cp "$HELLO" "$MNT/hello"
 
-for program in cat ls echo mkdir; do
+for program in cat ls echo mkdir rm rmdir; do
     sudo cp "./user/$program" "$MNT/$program"
 done
 

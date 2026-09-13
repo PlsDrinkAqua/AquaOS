@@ -105,7 +105,20 @@ int task_resolve_path(const char *path, char *out, size_t size) {
     return 0;
 }
 
-int task_chdir(const char *path) {
+/* Called while filesystem mutations are serialized. Compare inode identity,
+ * so aliases involving repeated slashes or dot components cannot bypass this. */
+int task_directory_in_use(uint32_t ino) {
+    for (unsigned i = 0; i < TASK_MAX; i++) {
+        if (task_table[i].state == TASK_UNUSED || task_table[i].state == TASK_EXITED) continue;
+        uint32_t cwd_ino;
+        int result = ext2_lookup_inode(task_table[i].cwd, &cwd_ino);
+        if (result < 0) return result;
+        if (cwd_ino == ino) return 1;
+    }
+    return 0;
+}
+
+static int task_chdir_locked(const char *path) {
     char absolute[TASK_IMAGE_PATH_BYTES];
     ext2_file_t file;
     int result = task_resolve_path(path, absolute, sizeof(absolute));
@@ -135,6 +148,13 @@ int task_chdir(const char *path) {
     }
     out[used] = 0;
     return 0;
+}
+
+int task_chdir(const char *path) {
+    task_preemption_disable();
+    int result = task_chdir_locked(path);
+    task_preemption_enable();
+    return result;
 }
 
 static void task_clear_wait_state(task_t *task) {

@@ -31,6 +31,8 @@ int dup2(int oldfd, int newfd);
 int pipe(int pipefd[2]);
 int fork(void);
 int chdir(const char *path);
+int unlink(const char *path);
+int rmdir(const char *path);
 int mkdir(const char *path);
 char *getcwd(char *buf, size_t size);
 off_t lseek(int fd, off_t offset, int whence);

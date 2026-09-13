@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Boot myos.iso against a disposable ext2 disk; requires QEMU and e2fsprogs."""
+import argparse
 import json
 from pathlib import Path
 import socket
@@ -10,19 +11,30 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run():
+def run(block_size):
+    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck"], check=True,
+                   stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
         disk = tmp / "disk.img"
         with disk.open("wb") as f:
             f.truncate(100 * 1024 * 1024)
-        subprocess.run(["mkfs.ext2", "-q", "-F", str(disk)], check=True)
+        subprocess.run(["mkfs.ext2", "-q", "-F", "-b", str(block_size), str(disk)], check=True)
         hello = tmp / "hello.txt"
         hello.write_text("hello, ZenOS\n")
         bar = tmp / "bar.dat"
         bar.write_text("foo\n")
         commands = ["mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir"]
+        linked = tmp / "linked"
+        linked.write_text("linked")
+        oversized = tmp / "oversized"
+        oversized.write_bytes(b"x" * (5 * 1024 * 1024))
+        commands += [f"write {linked} /fscheck-link-a",
+                     "ln /fscheck-link-a /fscheck-link-b",
+                     "set_inode_field /fscheck-link-a links_count 2",
+                     f"write {oversized} /fscheck-oversized",
+                     "symlink /fscheck-symlink /hello.txt"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
@@ -78,7 +90,7 @@ def run():
             keys = {" ": "spc", "/": "slash", ".": "dot", "-": "minus",
                     "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash"}
 
-            def command(text, expected=None):
+            def command(text, expected=None, seconds=12):
                 qmp("human-monitor-command", {"command-line": "sendkey ret"})
                 time.sleep(.1)
                 for char in "clear":
@@ -91,7 +103,7 @@ def run():
                     time.sleep(.025)
                 qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
                 time.sleep(.35)
-                output = wait_for(expected) if expected else screen()
+                output = wait_for(expected, seconds) if expected else screen()
                 if "FAIL" in output or "cannot execute" in output:
                     raise AssertionError(output)
                 print(f"PASS: {text}", flush=True)
@@ -100,6 +112,15 @@ def run():
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            command("fscheck", "filesystem deletion checks passed", seconds=90)
+            command("mkdir /remove-me", "exited from /mkdir with status 0")
+            command("echo temporary > /remove-me/note")
+            command("rmdir /remove-me", "errno=39")
+            command("cd /remove-me")
+            command("rm note", "exited from /rm with status 0")
+            command("cd /")
+            command("rmdir /remove-me", "exited from /rmdir with status 0")
+            command("rm /remove-me/note", "errno=2")
             # A nested shell must return to its parent (including the parent's cwd).
             command("shell", "shell at")
             command("cd /subdir")
@@ -161,6 +182,11 @@ def run():
                                        text=True, capture_output=True, check=True)
             if persisted.stdout != "saved\n":
                 raise AssertionError("Directory contents did not persist: " + persisted.stdout)
+            for removed in ["/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
+                result = subprocess.run(["debugfs", "-R", f"stat {removed}", str(disk)],
+                                        text=True, capture_output=True, check=True)
+                if "File not found" not in result.stderr:
+                    raise AssertionError(f"Deleted path persisted: {removed}: {result.stdout}")
             print("PASS: ext2 integrity and persisted directory contents", flush=True)
             print("All shell smoke checks passed.", flush=True)
         finally:
@@ -169,4 +195,6 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--block-size", type=int, choices=[1024, 4096], default=1024)
+    run(parser.parse_args().block_size)

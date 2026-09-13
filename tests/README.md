@@ -4,6 +4,7 @@ Build and run the QEMU smoke checks from the repository root:
 make -C user
 sh iso.sh
 python3 tests/shell_smoke.py
+python3 tests/shell_smoke.py --block-size 4096
 ```
 
 The test creates and removes its own ext2 disk. It does not modify your existing
@@ -21,7 +22,7 @@ the executable path as argv[0]; an empty vector produces argc = 0.
 Invalid pointers return EFAULT; excessive arguments return E2BIG.
 All user programs must be rebuilt for the new exec syscall ABI.
 
-The shell runs standalone /cat, /ls, and /echo, with space/tab-separated
+The shell runs standalone /cat, /ls, /echo, /mkdir, /rm, and /rmdir, with space/tab-separated
 arguments. It supports up to four pipeline stages and <, >, and >> redirection.
 Quoting, escapes, and environment variables are not implemented.
 Bare cat copies standard input; press Ctrl+D to finish keyboard input.
@@ -61,3 +62,48 @@ QEMU and runs read-only `e2fsck -fn`
 on the disposable disk. It also reads back a file inside a newly created
 directory with debugfs to verify persistence. `e2fsck` is therefore required
 as well.
+
+File deletion is available through `unlink(path)` and `/rm`; empty directories
+can be removed through `rmdir(path)` and `/rmdir`. Both commands accept multiple
+paths and return a nonzero status if any removal fails. Options and recursive
+deletion are not implemented. For example:
+
+```sh
+mkdir /scratch
+echo temporary > /scratch/note
+rm /scratch/note
+rmdir /scratch
+```
+
+Unlink removes a name immediately, decrements its inode's link count, and frees
+the inode and data blocks only after the last link and open descriptor are gone.
+Separate opens, dup, fork, and process exit all participate in this lifetime.
+Open descriptors refresh inode metadata before reading, writing, seeking, or
+listing, so stale handles cannot restore a deleted link or use freed blocks
+after another descriptor truncates the file.
+
+Unlink rejects directories with EISDIR. Rmdir rejects regular files with
+ENOTDIR, nonempty directories with ENOTEMPTY, and root, open directories, or
+any live process's working directory with EBUSY. Final `.` and `..` components
+are rejected with EINVAL. A trailing slash requires a directory. Deletion of
+special files (including symlinks), double/triple-indirect layouts, and inodes
+with external attribute blocks is currently rejected before changing metadata.
+Direct and single-indirect blocks, including sparse files, are reclaimed.
+
+Like mkdir, deletion is not journaled. A crash or disk error during metadata
+updates can require e2fsck; there is no persistent orphan recovery for files
+unlinked while open. A final-close reclamation error is returned by close;
+process exit has no caller to receive that error.
+
+The smoke runner builds a test-only `/fscheck` from `tests/fs_delete.c` and
+installs it on the disposable disk. It checks syscall errors, hard links,
+independent and duplicated descriptors, fork/exit cleanup, another process's
+working directory, large and sparse file reclamation, and deletion across
+directory block boundaries. Shell commands run afterward, also checking that
+kernel heap mappings remain usable when the stress program exits. Offline
+e2fsck and debugfs checks validate disk consistency, retained contents, and
+the absence of deleted paths. Both 1 KiB and 4 KiB ext2 blocks are supported
+by this test setup.
+
+`make -C user` builds the new commands, and `disk_test.sh` includes them when
+creating a fresh disk. The smoke runner does not update existing disk images.

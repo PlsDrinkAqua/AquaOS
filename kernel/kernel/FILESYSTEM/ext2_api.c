@@ -6,6 +6,8 @@
 #include <kernel/ext2.h>
 #include <kernel/ext2_api.h>
 #include <kernel/kmalloc.h>
+#include <kernel/fd.h>
+#include <kernel/task.h>
 
 #define EXT2_ROOT_INO 2
 #define EXT2_S_IFMT  0xF000
@@ -77,6 +79,9 @@ static int inode_ensure_block(struct ext2_inode *inode, uint32_t index, uint32_t
 
 static int inode_truncate(uint32_t ino, struct ext2_inode *inode) {
     uint32_t bs = block_size(), *indirect;
+    /* Do not partially free layouts this driver cannot traverse. */
+    if (inode->i_block[13] || inode->i_block[14]) return -K_EFBIG;
+    if (inode->i_file_acl) return -K_ENOSYS;
     for (int i = 0; i < 12; i++) if (inode->i_block[i]) {
         if (ext2_free_block(inode->i_block[i]) < 0) return -K_EIO;
         inode->i_block[i] = 0;
@@ -197,6 +202,131 @@ static int resolve_path(const char *path, int create, uint32_t *ino_out) {
     kfree(tmp); *ino_out = ino; return 0;
 }
 
+/* Callers serialize filesystem mutations with task_preemption_disable(). */
+int ext2_lookup_inode(const char *path, uint32_t *ino) {
+    return resolve_path(path, 0, ino);
+}
+
+int ext2_reclaim_unlinked(uint32_t ino) {
+    struct ext2_inode inode;
+    if (ext2_read_inode(ino, &inode) < 0) return -K_EIO;
+    if (inode.i_links_count || fd_inode_is_open(ino)) return 0;
+    int result = inode_truncate(ino, &inode);
+    if (result < 0) return result;
+    /* Small dtime values encode orphan-list inode numbers to e2fsck. Until
+     * there is a wall clock, use the image timestamp (or 2000-01-01). */
+    inode.i_dtime = ext2_sb()->s_wtime > ext2_sb()->s_inodes_count ?
+        ext2_sb()->s_wtime : 946684800U;
+    if (ext2_write_inode(ino, &inode) < 0) return -K_EIO;
+    return ext2_free_inode(ino) < 0 ? -K_EIO : 0;
+}
+
+static int directory_empty(uint32_t ino) {
+    ext2_file_t file;
+    char name[EXT2_NAME_MAX + 1];
+    kmemset(&file, 0, sizeof(file));
+    file.used = 1; file.ino = ino;
+    if (ext2_read_inode(ino, &file.inode) < 0) return -K_EIO;
+    file.size = inode_size(&file.inode);
+    int result;
+    while ((result = ext2_file_read_dir(&file, name, sizeof(name))) > 0) {
+        if (kstrcmp(name, ".") && kstrcmp(name, "..")) return -K_ENOTEMPTY;
+    }
+    return result;
+}
+
+static int remove_dir_entry(const struct ext2_inode *parent, const char *name,
+                            uint32_t ino) {
+    uint32_t bs = block_size();
+    uint8_t *buf = kmalloc(bs);
+    if (!buf) return -K_ENOMEM;
+    int result = -K_ENOENT;
+    for (uint32_t i = 0; (uint64_t)i * bs < parent->i_size_lo; i++) {
+        uint32_t block, offset = 0;
+        struct ext2_dir_entry_2 *previous = NULL;
+        if (inode_block(parent, i, &block) < 0 || !block ||
+            ext2_read_block(block, buf) < 0) { result = -K_EIO; break; }
+        while (offset < bs) {
+            struct ext2_dir_entry_2 *de = (void *)(buf + offset);
+            if (offset + 8 > bs || de->rec_len < 8 || (de->rec_len & 3) ||
+                offset + de->rec_len > bs || de->name_len > de->rec_len - 8) {
+                result = -K_EIO; goto done;
+            }
+            if (de->inode == ino && de->name_len == kstrlen(name) &&
+                !kmemcmp(de->name, name, de->name_len)) {
+                if (previous) previous->rec_len += de->rec_len;
+                else { de->inode = 0; de->name_len = 0; de->file_type = 0; }
+                result = ext2_write_block(block, buf) < 0 ? -K_EIO : 0;
+                goto done;
+            }
+            previous = de;
+            offset += de->rec_len;
+        }
+    }
+done:
+    kfree(buf);
+    return result;
+}
+
+int ext2_remove(const char *path, int directory) {
+    if (!path || !*path) return -K_ENOENT;
+    size_t length = kstrlen(path);
+    int trailing_slash = path[length - 1] == '/';
+    char *storage = kmalloc(length + 1);
+    if (!storage) return -K_ENOMEM;
+    kmemcpy(storage, path, length + 1);
+    while (length && storage[length - 1] == '/') storage[--length] = 0;
+    int result = -K_EBUSY;
+    if (!length) goto done;
+    size_t start = length;
+    while (start && storage[start - 1] != '/') start--;
+    const char *name = storage + start;
+    if (!kstrcmp(name, ".") || !kstrcmp(name, "..")) { result = -K_EINVAL; goto done; }
+    if (length - start > EXT2_NAME_MAX) { result = -K_ENAMETOOLONG; goto done; }
+    if (start) storage[start - 1] = 0;
+    uint32_t parent_ino, ino;
+    struct ext2_inode parent, child;
+    result = resolve_path(start && *storage ? storage : "/", 0, &parent_ino);
+    if (result < 0) goto done;
+    result = lookup(parent_ino, name, &ino);
+    if (result < 0) goto done;
+    if (ino == EXT2_ROOT_INO) { result = -K_EBUSY; goto done; }
+    if (ext2_read_inode(parent_ino, &parent) < 0 || ext2_read_inode(ino, &child) < 0) {
+        result = -K_EIO; goto done;
+    }
+    int is_dir = (child.i_mode & EXT2_S_IFMT) == EXT2_S_IFDIR;
+    if ((directory || trailing_slash) && !is_dir) { result = -K_ENOTDIR; goto done; }
+    if (!directory && is_dir) { result = -K_EISDIR; goto done; }
+    if (!is_dir && (child.i_mode & EXT2_S_IFMT) != EXT2_S_IFREG) {
+        result = -K_EPERM; goto done;
+    }
+    if (child.i_block[13] || child.i_block[14]) { result = -K_EFBIG; goto done; }
+    if (child.i_file_acl) { result = -K_ENOSYS; goto done; }
+    if (!child.i_links_count) { result = -K_EIO; goto done; }
+    if (is_dir) {
+        result = task_directory_in_use(ino);
+        if (result < 0) goto done;
+        if (result || fd_inode_is_open(ino)) { result = -K_EBUSY; goto done; }
+        result = directory_empty(ino);
+        if (result < 0) goto done;
+        if (child.i_links_count != 2 || parent.i_links_count < 2) { result = -K_EIO; goto done; }
+    }
+    result = remove_dir_entry(&parent, name, ino);
+    if (result < 0) goto done;
+    child.i_links_count = is_dir ? 0 : child.i_links_count - 1;
+    if (ext2_write_inode(ino, &child) < 0) { result = -K_EIO; goto done; }
+    if (is_dir) {
+        parent.i_links_count--;
+        if (ext2_write_inode(parent_ino, &parent) < 0 || ext2_adjust_dirs(ino, -1) < 0) {
+            result = -K_EIO; goto done;
+        }
+    }
+    result = ext2_reclaim_unlinked(ino);
+done:
+    kfree(storage);
+    return result;
+}
+
 int ext2_mkdir(const char *path) {
     if (!path || !*path) return -K_ENOENT;
     size_t length = kstrlen(path);
@@ -296,9 +426,16 @@ int ext2_file_is_dir(const ext2_file_t *file) {
     return file && file->used && (file->inode.i_mode & EXT2_S_IFMT) == EXT2_S_IFDIR;
 }
 
+static int file_refresh(ext2_file_t *file) {
+    if (ext2_read_inode(file->ino, &file->inode) < 0) return -K_EIO;
+    file->size = inode_size(&file->inode);
+    return 0;
+}
+
 int ext2_file_read(ext2_file_t *file, void *buf, size_t count) {
     uint32_t bs = block_size(); uint8_t *tmp; size_t total = 0;
     if (!file || !file->used || (!buf && count)) return -K_EFAULT;
+    if (file_refresh(file) < 0) return -K_EIO;
     if (ext2_file_is_dir(file)) return -K_EISDIR;
     if (!count) return 0;
     tmp = kmalloc(bs); if (!tmp) return -K_ENOMEM;
@@ -319,6 +456,7 @@ int ext2_file_read(ext2_file_t *file, void *buf, size_t count) {
 int ext2_file_write(ext2_file_t *file, const void *buf, size_t count, int append) {
     uint32_t bs = block_size(); uint8_t *tmp; size_t total = 0;
     if (!file || !file->used || (!buf && count)) return -K_EFAULT;
+    if (file_refresh(file) < 0) return -K_EIO;
     if (ext2_file_is_dir(file)) return -K_EISDIR;
     if (append) file->pos = file->size;
     if (!count) return 0;
@@ -344,6 +482,7 @@ int ext2_file_write(ext2_file_t *file, const void *buf, size_t count, int append
 int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence) {
     int64_t base, next;
     if (!file || !file->used) return -K_EBADF;
+    if (file_refresh(file) < 0) return -K_EIO;
     if (whence == 0) base = 0; else if (whence == 1) base = file->pos;
     else if (whence == 2) base = file->size; else return -K_EINVAL;
     next = base + offset;
@@ -354,6 +493,7 @@ int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence) {
 int ext2_file_read_dir(ext2_file_t *file, char *name, size_t name_size) {
     uint32_t bs = block_size(); uint8_t *buf;
     if (!file || !file->used || !name || !name_size) return -K_EINVAL;
+    if (file_refresh(file) < 0) return -K_EIO;
     if (!ext2_file_is_dir(file)) return -K_ENOTDIR;
     buf = kmalloc(bs); if (!buf) return -K_ENOMEM;
     while (file->pos < file->size) {

@@ -26,6 +26,8 @@ enum {
     SYS_CHDIR   = 21,
     SYS_GETCWD  = 22,
     SYS_MKDIR   = 23,
+    SYS_UNLINK  = 24,
+    SYS_RMDIR   = 25,
 };
 
 #ifdef __cplusplus

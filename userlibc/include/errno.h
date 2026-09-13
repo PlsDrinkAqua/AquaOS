@@ -28,5 +28,6 @@ extern int errno;
 #define EMLINK 31
 #define EPIPE   32
 #define ENOSYS  38
+#define ENOTEMPTY 39
 
 #endif

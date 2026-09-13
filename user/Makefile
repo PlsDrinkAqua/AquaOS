@@ -19,7 +19,7 @@ LIBS:=$(LIBS) ../userlibc/libc.a -nostdlib -lgcc
 # 不要加 -D__is_kernel
 # 不要链接 -lk
 
-TARGETS = shell hello cat ls echo mkdir
+TARGETS = shell hello cat ls echo mkdir rm rmdir
 
 .PHONY: all clean userlibc
 .SUFFIXES: .o .c .S
@@ -29,8 +29,11 @@ all: $(TARGETS)
 userlibc:
 	$(MAKE) -C ../userlibc
 
-$(TARGETS): %: %.o userlibc user.ld
+$(TARGETS) fscheck: %: %.o userlibc user.ld
 	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) ../userlibc/crt0.o $< $(LIBS)
+
+fscheck.o: ../tests/fs_delete.c
+	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
@@ -39,8 +42,8 @@ $(TARGETS): %: %.o userlibc user.ld
 	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
 clean:
-	rm -f $(TARGETS)
+	rm -f $(TARGETS) fscheck fscheck.o
 	rm -f $(TARGETS:=.o) *.d
 	$(MAKE) -C ../userlibc clean
 
--include $(TARGETS:=.d)
+-include $(TARGETS:=.d) fscheck.d

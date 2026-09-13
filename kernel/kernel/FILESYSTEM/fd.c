@@ -49,9 +49,26 @@ static pipe_object_t *pipe_alloc(void) {
     return NULL;
 }
 
-static void open_file_put(open_file_t *file) {
+int fd_inode_is_open(uint32_t ino) {
+    for (int i = 0; i < OPEN_FILE_MAX; i++) {
+        open_file_t *file = &open_files[i];
+        if (file->used && file->refs && file->type == FD_EXT2 &&
+            file->object.ext2.used && file->object.ext2.ino == ino) return 1;
+    }
+    return 0;
+}
+
+static int open_file_put(open_file_t *file) {
     pipe_object_t *pipe;
-    if (!file || !file->used || file->refs == 0 || --file->refs != 0) return;
+    int result = 0;
+    task_preemption_disable();
+    if (!file || !file->used || file->refs == 0 || --file->refs != 0) {
+        task_preemption_enable();
+        return 0;
+    }
+    if (file->type == FD_EXT2 && file->object.ext2.used) {
+        result = ext2_reclaim_unlinked(file->object.ext2.ino);
+    }
     if (file->type == FD_PIPE_READ || file->type == FD_PIPE_WRITE) {
         pipe = file->object.pipe;
         if (pipe && pipe->used) {
@@ -62,6 +79,8 @@ static void open_file_put(open_file_t *file) {
         }
     }
     kmemset(file, 0, sizeof(*file));
+    task_preemption_enable();
+    return result;
 }
 
 static fd_entry_t *fd_get(int fd) {
@@ -133,9 +152,9 @@ int fd_open(const char *path, int flags) {
 int fd_close(int fd) {
     fd_entry_t *e = fd_get(fd);
     if (!e) return -K_EBADF;
-    open_file_put(e->open);
+    int result = open_file_put(e->open);
     kmemset(e, 0, sizeof(*e));
-    return 0;
+    return result;
 }
 
 int fd_dup(int oldfd) {

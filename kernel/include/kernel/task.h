@@ -48,6 +48,7 @@ typedef struct task {
 } task_t;
 
 int task_resolve_path(const char *path, char *out, size_t size);
+int task_directory_in_use(uint32_t ino);
 int task_chdir(const char *path);
 void tasking_init(void);
 task_t *task_current(void);
