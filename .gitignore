@@ -13,3 +13,5 @@ disk
 /user/rm
 /user/rmdir
 /user/fscheck
+
+/user/memcheck

@@ -29,8 +29,11 @@ all: $(TARGETS)
 userlibc:
 	$(MAKE) -C ../userlibc
 
-$(TARGETS) fscheck: %: %.o userlibc user.ld
+$(TARGETS) fscheck memcheck: %: %.o userlibc user.ld
 	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) ../userlibc/crt0.o $< $(LIBS)
+
+memcheck.o: ../tests/memory_stress.c
+	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
 fscheck.o: ../tests/fs_delete.c
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
@@ -42,8 +45,8 @@ fscheck.o: ../tests/fs_delete.c
 	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
 clean:
-	rm -f $(TARGETS) fscheck fscheck.o
+	rm -f $(TARGETS) fscheck fscheck.o memcheck memcheck.o
 	rm -f $(TARGETS:=.o) *.d
 	$(MAKE) -C ../userlibc clean
 
--include $(TARGETS:=.d) fscheck.d
+-include $(TARGETS:=.d) fscheck.d memcheck.d

@@ -1,156 +1,73 @@
 #include <stddef.h>
 #include <stdint.h>
-#include <libk/stdio.h>
-#include "kernel/kha.h"
-#include "kernel/vmm.h"
-#include "kernel/kmalloc.h"
+#include <kernel/kha.h>
+#include <kernel/kmalloc.h>
+#include <kernel/task.h>
 
-#define ALIGN_UP(x, a)   (((x) + (a) - 1) & ~((a) - 1))
-#define KMALLOC_ALIGN    8
-#define PAGE_SIZE       0x1000U                          // 4 KiB
-
-#define VMM_PRESENT  (1<<0)
-#define VMM_RW       (1<<1)
-#define VMM_USER     (1<<2)
+#define KMALLOC_ALIGN ((size_t)8)
+#define PAGE_SIZE ((size_t)4096)
+#define VMM_PRESENT 1U
+#define VMM_RW 2U
 
 typedef struct kmem_block {
-    size_t size;               // size of this block *including* header
-    struct kmem_block *next;   // next free block
+    size_t size; /* Includes this header. */
+    struct kmem_block *next;
 } kmem_block_t;
 
-static kmem_block_t *free_list = NULL;
-// static uintptr_t    heap_end  = 0;  // tracks how far we’ve grown our heap
+static kmem_block_t *free_list;
 
-static kmem_block_t* expand_heap(size_t need) {
-    // round total request (need + header) up to pages
-    size_t total = ALIGN_UP(need + sizeof(kmem_block_t), PAGE_SIZE);
-    size_t npages = total / PAGE_SIZE;
-
-    void *v = vmm_alloc_pages(npages, VMM_PRESENT | VMM_RW);
-    if (!v) return NULL;
-
-    // create one big free block covering that range
-    kmem_block_t *blk = (kmem_block_t*)v;
-    blk->size = npages * PAGE_SIZE;
-    blk->next = NULL;
-    return blk;
+/* Keep free ranges ordered and merge only adjacent virtual ranges.
+ * Page allocations used by other kernel subsystems may separate heap chunks. */
+static void insert_free(kmem_block_t *block) {
+    kmem_block_t *previous = NULL, *next = free_list;
+    while (next && (uintptr_t)next < (uintptr_t)block) {
+        previous = next;
+        next = next->next;
+    }
+    block->next = next;
+    if (next && (uintptr_t)block + block->size == (uintptr_t)next) {
+        block->size += next->size;
+        block->next = next->next;
+    }
+    if (previous && (uintptr_t)previous + previous->size == (uintptr_t)block) {
+        previous->size += block->size;
+        previous->next = block->next;
+    } else if (previous) previous->next = block;
+    else free_list = block;
 }
 
-void *kmalloc(size_t sz) {
-    if (sz == 0) return NULL;
-    // align
-    sz = ALIGN_UP(sz, KMALLOC_ALIGN);
-
-    kmem_block_t **prev = &free_list;
-    kmem_block_t  *cur  = free_list;
-
-    // 1) search for a free block large enough
-    while (cur) {
-        if (cur->size >= sz + sizeof(kmem_block_t)) {
-            // found it — detach from free list
-            *prev = cur->next;
-
-            // optionally split if the remainder is big enough
-            size_t leftover = cur->size - (sz + sizeof(kmem_block_t));
-            if (leftover >= sizeof(kmem_block_t) + KMALLOC_ALIGN) {
-                kmem_block_t *rem = (kmem_block_t*)((uint8_t*)cur
-                                            + sizeof(kmem_block_t) + sz);
-                rem->size = leftover;
-                rem->next = free_list;
-                free_list = rem;
-
-                cur->size = sz + sizeof(kmem_block_t);
-            }
-
-            // return address just past the header
-            return (void*)(cur + 1);
+void *kmalloc(size_t size) {
+    if (!size || size > SIZE_MAX - sizeof(kmem_block_t) - (PAGE_SIZE - 1)) return NULL;
+    size_t need = ((size + KMALLOC_ALIGN - 1) & ~(KMALLOC_ALIGN - 1)) + sizeof(kmem_block_t);
+    task_preemption_disable();
+    for (;;) {
+        kmem_block_t **link = &free_list;
+        while (*link && (*link)->size < need) link = &(*link)->next;
+        kmem_block_t *block = *link;
+        if (block) {
+            size_t remaining = block->size - need;
+            if (remaining >= sizeof(kmem_block_t) + KMALLOC_ALIGN) {
+                kmem_block_t *rest = (void *)((uint8_t *)block + need);
+                rest->size = remaining;
+                rest->next = block->next;
+                *link = rest;
+                block->size = need;
+            } else *link = block->next;
+            block->next = NULL;
+            task_preemption_enable();
+            return block + 1;
         }
-        prev = &cur->next;
-        cur  = cur->next;
+        size_t total = (need + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        block = vmm_alloc_pages(total / PAGE_SIZE, VMM_PRESENT | VMM_RW);
+        if (!block) { task_preemption_enable(); return NULL; }
+        block->size = total;
+        insert_free(block);
     }
-
-    // 2) no block found — grow the heap
-    kmem_block_t *blk = expand_heap(sz);
-    if (!blk) return NULL;
-
-    // if it’s bigger than we need, split as above:
-    size_t extra = blk->size - (sz + sizeof(kmem_block_t));
-    if (extra >= sizeof(kmem_block_t) + KMALLOC_ALIGN) {
-        kmem_block_t *rem = (kmem_block_t*)((uint8_t*)blk
-                                    + sizeof(kmem_block_t) + sz);
-        rem->size = extra;
-        rem->next = free_list;
-        free_list  = rem;
-
-        blk->size = sz + sizeof(kmem_block_t);
-    }
-
-    return (void*)(blk + 1);
 }
-
 
 void kfree(void *ptr) {
     if (!ptr) return;
-    kmem_block_t *blk = ((kmem_block_t*)ptr) - 1;
-
-    // simple: push to free_list head
-    blk->next   = free_list;
-    free_list   = blk;
-
-    // TODO: you can walk free_list and merge any two adjacent blocks
-    // if (blk + blk->size == blk->next) { /* coalesce */ }
+    task_preemption_disable();
+    insert_free((kmem_block_t *)ptr - 1);
+    task_preemption_enable();
 }
-
-
-// void kmalloc_test(void) {
-//     kprintf("=== kmalloc/kfree test start ===\n");
-
-//     // 1) 简单小块分配
-//     void *p1 = kmalloc(24);
-//     kprintf("Allocated p1 (24 bytes): 0x%x\n", p1);
-//     if (!p1) {
-//         kprintf("  [ERROR] kmalloc returned NULL\n");
-//         return;
-//     }
-//     // 写入并验证数据完整性
-//     kmemset(p1, 0xAA, 24);
-//     for (size_t i = 0; i < 24; i++) {
-//         if (((uint8_t*)p1)[i] != 0xAA) {
-//             kprintf("  [ERROR] data corruption at p1[%d]\n", (unsigned)i);
-//             break;
-//         }
-//     }
-
-//     // 2) 再申请一个中等大小块
-//     void *p2 = kmalloc(40);
-//     kprintf("Allocated p2 (40 bytes): 0x%x\n", p2);
-
-//     // 3) 释放 p1，测试下次分配能否重用
-//     kfree(p1);
-//     kprintf("Freed p1\n");
-
-//     void *p3 = kmalloc(16);
-//     kprintf("Allocated p3 (16 bytes): 0x%x  (expected == p1)\n", p3);
-
-//     // 4) 释放剩余
-//     kfree(p2);
-//     kprintf("Freed p2\n");
-//     kfree(p3);
-//     kprintf("Freed p3\n");
-
-//     // 5) 大块分配：测试堆扩展逻辑
-//     size_t big_size = PAGE_SIZE * 2 + 100;
-//     void *p4 = kmalloc(big_size);
-//     kprintf("Allocated p4 (%u bytes): 0x%x\n", big_size, p4);
-//     if (!p4) {
-//         kprintf("  [ERROR] large kmalloc returned NULL\n");
-//     } else {
-//         // 可选：向首尾写入，保证这块新页可用
-//         kmemset(p4, 0x55, 1);
-//         kmemset((uint8_t*)p4 + big_size - 1, 0x55, 1);
-//     }
-//     kfree(p4);
-//     kprintf("Freed p4\n");
-
-//     kprintf("=== kmalloc/kfree test complete ===\n");
-// }

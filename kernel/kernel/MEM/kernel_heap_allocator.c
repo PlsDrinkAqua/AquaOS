@@ -29,6 +29,7 @@ void *vmm_alloc_pages(size_t npages, uint32_t flags) {
     // 对齐 heap_brk 到页边界
     uintptr_t va = (heap_brk + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     uintptr_t base = va;
+    if (!npages || va < heap_brk || npages > (UINTPTR_MAX - va) / PAGE_SIZE) return NULL;
 
     for (size_t i = 0; i < npages; i++) {
         // 分配物理页

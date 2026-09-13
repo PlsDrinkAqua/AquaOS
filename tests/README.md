@@ -107,3 +107,37 @@ by this test setup.
 
 `make -C user` builds the new commands, and `disk_test.sh` includes them when
 creating a fresh disk. The smoke runner does not update existing disk images.
+
+Memory reliability checks:
+
+```sh
+sh tests/allocator_host.sh
+make -C user
+sh iso.sh
+python3 tests/shell_smoke.py
+```
+
+The host test compiles the real kernel and user allocators against bounded
+backing storage. It checks overflow rejection, adjacent-block reuse without
+heap growth, live-allocation contents, exhaustion/recovery, and preservation of
+memory reserved directly through sbrk. It requires a host C compiler (`cc`).
+The native host test supplements the i386 QEMU tests; it does not emulate
+paging or scheduling.
+
+The smoke runner also builds and runs the test-only `/memcheck`. It verifies
+8-byte malloc alignment, allocation overflow, repeated allocation/free cycles,
+sbrk bounds (including INTPTR_MIN), zero-filled newly mapped heap pages, and
+rollback after requests exceed available physical memory. Forty fork/wait
+cycles include intentional user protection faults and repeated descriptor
+exhaustion. The parent and shell must remain usable afterward. User exceptions
+in this test are expected; a `FAIL` marker or fatal kernel exception fails the
+smoke runner immediately.
+
+The kernel allocator now coalesces adjacent free ranges and serializes its
+free list against task preemption. User malloc aligns both metadata and
+returned pointers, checks sizes before rounding or calling sbrk, and does not
+merge across allocations owned by direct sbrk callers. Applications must still
+free valid allocation pointers exactly once and must not shrink sbrk across
+live malloc allocations. Freed kernel heap memory is retained for reuse;
+returning unused heap pages to the physical allocator and kernel stack guards
+remain future work.

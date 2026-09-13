@@ -15,10 +15,4 @@ void *kmalloc(size_t size);
  */
 void  kfree(void *ptr);
 
-/**
- * Run the kmalloc/kfree self‑test.
- * Print pass/fail diagnostics to the console.
- */
-void  kmalloc_test(void);
-
 #endif

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 
 #define MALLOC_ALIGN 8U
 #define CHUNK_SIZE   4096U
@@ -10,7 +11,7 @@ typedef struct malloc_block {
     size_t size;
     int free;
     struct malloc_block *next;
-} malloc_block_t;
+} __attribute__((aligned(MALLOC_ALIGN))) malloc_block_t;
 
 static malloc_block_t *heap_head;
 static malloc_block_t *heap_tail;
@@ -56,11 +57,12 @@ static void split_block(malloc_block_t *block, size_t size) {
 
 static malloc_block_t *request_block(size_t size) {
     size_t total = align_up(size + sizeof(malloc_block_t), CHUNK_SIZE);
-    malloc_block_t *block = sbrk((intptr_t)total);
-
-    if (block == (void *)-1) {
-        return NULL;
-    }
+    void *current = sbrk(0);
+    if (current == (void *)-1) return NULL;
+    size_t padding = (0U - (uintptr_t)current) & (MALLOC_ALIGN - 1);
+    void *base = sbrk((intptr_t)(total + padding));
+    if (base == (void *)-1) return NULL;
+    malloc_block_t *block = (void *)((uint8_t *)base + padding);
 
     block->size = total - sizeof(malloc_block_t);
     block->free = 0;
@@ -79,6 +81,11 @@ static malloc_block_t *request_block(size_t size) {
 
 void *malloc(size_t size) {
     malloc_block_t *block;
+
+    if (size > (size_t)INTPTR_MAX - sizeof(malloc_block_t) - (CHUNK_SIZE - 1)) {
+        errno = ENOMEM;
+        return NULL;
+    }
 
     if (size == 0) {
         return NULL;
@@ -102,7 +109,8 @@ static void coalesce_free_blocks(void) {
     malloc_block_t *cur = heap_head;
 
     while (cur && cur->next) {
-        if (cur->free && cur->next->free) {
+        if (cur->free && cur->next->free &&
+            (uint8_t *)(cur + 1) + cur->size == (uint8_t *)cur->next) {
             cur->size += sizeof(malloc_block_t) + cur->next->size;
             cur->next = cur->next->next;
             if (!cur->next) {
@@ -131,6 +139,7 @@ void *calloc(size_t nmemb, size_t size) {
     uint8_t *ptr;
 
     if (nmemb != 0 && size > ((size_t)-1) / nmemb) {
+        errno = ENOMEM;
         return NULL;
     }
 

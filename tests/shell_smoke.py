@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(block_size):
-    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck"], check=True,
+    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck"], check=True,
                    stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
@@ -34,7 +34,7 @@ def run(block_size):
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
@@ -82,6 +82,8 @@ def run(block_size):
                 deadline = time.monotonic() + seconds
                 while time.monotonic() < deadline:
                     text = screen()
+                    if "FAIL" in text or "fatal kernel exception" in text:
+                        raise AssertionError(text)
                     if expected in text:
                         return text
                     time.sleep(.1)
@@ -112,6 +114,7 @@ def run(block_size):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            command("memcheck", "memory reliability checks passed", seconds=90)
             command("fscheck", "filesystem deletion checks passed", seconds=90)
             command("mkdir /remove-me", "exited from /mkdir with status 0")
             command("echo temporary > /remove-me/note")

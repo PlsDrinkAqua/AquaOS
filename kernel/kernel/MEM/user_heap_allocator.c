@@ -5,6 +5,7 @@
 #include "kernel/pmm.h"
 #include "kernel/task.h"
 #include "kernel/user_heap.h"
+#include <libk/string.h>
 
 #define PAGE_SIZE       0x1000U
 #define ALIGN_UP(x, a)  (((x) + (a) - 1) & ~((a) - 1))
@@ -45,13 +46,13 @@ void *sys_sbrk(intptr_t increment) {
 
     // 防止整数溢出/下溢
     if (increment > 0) {
-        if (old_brk > task->heap_limit - (uintptr_t)increment) {
+        if ((uintptr_t)increment > task->heap_limit - old_brk) {
             return (void *)-1;
         }
         new_brk = old_brk + (uintptr_t)increment;
     } else {
-        uintptr_t dec = (uintptr_t)(-increment);
-        if (old_brk < task->heap_start + dec) {
+        uintptr_t dec = 0U - (uintptr_t)increment;
+        if (dec > old_brk - task->heap_start) {
             return (void *)-1;
         }
         new_brk = old_brk - dec;
@@ -84,6 +85,8 @@ void *sys_sbrk(intptr_t increment) {
                 return (void *)-1;
             }
 
+            /* Never expose data left by another process in a recycled frame. */
+            kmemset((void *)(phys + 0xC0000000U), 0, PAGE_SIZE);
             if (vmm_map_page(va, phys, VMM_PRESENT | VMM_RW | VMM_USER) < 0) {
                 pmm_free_frame(phys);
 
