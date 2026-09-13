@@ -1,5 +1,10 @@
 # TinyCC dependency audit for ZenOS
 
+Implementation update: FILE streams and integer/string formatting are now also
+available, along with fcntl access/append handling and variadic open source
+compatibility. Streams are initially unbuffered. Floating-point formatting,
+sscanf and the other pending runtime dependencies still require work.
+
 Implementation update: the first libc batch now provides realloc, memcpy,
 memmove, memset, memcmp, strcpy, strchr, strrchr, strstr, atoi, strtol, strtoul,
 strtoll, strtoull and qsort. The tables below preserve the original audit

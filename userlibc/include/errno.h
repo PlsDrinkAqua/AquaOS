@@ -30,5 +30,6 @@ extern int errno;
 #define EPIPE   32
 #define ENOSYS  38
 #define ENOTEMPTY 39
+#define EOVERFLOW 75
 
 #endif

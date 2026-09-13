@@ -23,6 +23,7 @@ stdio/printf.o \
 stdio/putchar.o \
 stdio/puts.o \
 stdio/rename.o \
+stdio/streams.o \
 stdlib/exit.o \
 stdlib/malloc.o \
 stdlib/strto.o \
@@ -35,6 +36,7 @@ string/strlen.o \
 syscall/syscall.o \
 unistd/chdir.o \
 unistd/close.o \
+unistd/fcntl.o \
 unistd/dup.o \
 unistd/exec.o \
 unistd/fork.o \

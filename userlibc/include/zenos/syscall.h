@@ -29,6 +29,7 @@ enum {
     SYS_UNLINK  = 24,
     SYS_RMDIR   = 25,
     SYS_RENAME  = 26,
+    SYS_FCNTL   = 27,
 };
 
 #ifdef __cplusplus

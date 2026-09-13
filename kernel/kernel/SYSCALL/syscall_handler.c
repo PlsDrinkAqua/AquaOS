@@ -40,6 +40,7 @@ enum {
     SYS_UNLINK  = 24,
     SYS_RMDIR   = 25,
     SYS_RENAME  = 26,
+    SYS_FCNTL   = 27,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -282,6 +283,10 @@ void syscall_handler(interrupt_frame_t *regs)
             }
             break;
         }
+
+        case SYS_FCNTL:
+            regs->eax = (uint32_t)fd_fcntl((int)regs->ebx, (int)regs->ecx, (int)regs->edx);
+            break;
 
         case SYS_CLOSE:
             regs->eax = (uint32_t)fd_close((int)regs->ebx);

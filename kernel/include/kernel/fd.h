@@ -24,6 +24,7 @@ void *fd_wait_object(int fd);
 int fd_inode_is_open(uint32_t ino);
 int fd_open(const char *path, int flags);
 int fd_close(int fd);
+int fd_fcntl(int fd, int command, int flags);
 int fd_dup(int oldfd);
 int fd_dup2(int oldfd, int newfd);
 int fd_pipe(int pipefd[2]);

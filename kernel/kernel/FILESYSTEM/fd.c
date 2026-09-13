@@ -276,3 +276,17 @@ int fd_read_dir(int fd, char *name, size_t size) {
     task_preemption_disable(); result = ext2_file_read_dir(&e->open->object.ext2, name, size); task_preemption_enable();
     return result;
 }
+
+/* F_GETFL/F_SETFL subset: access mode is immutable; append is shared by dup/fork. */
+int fd_fcntl(int fd, int command, int flags) {
+    fd_entry_t *entry = fd_get(fd);
+    if (!entry) return -K_EBADF;
+    int current;
+    if (entry->type == FD_EXT2) current = entry->open->flags & (O_ACCMODE | O_APPEND);
+    else current = entry->type == FD_STDIN || entry->type == FD_PIPE_READ ? 0 : O_WRONLY;
+    if (command == 3) return current;
+    if (command != 4 || (flags & ~(O_ACCMODE | O_APPEND))) return -K_EINVAL;
+    if (entry->type == FD_EXT2)
+        entry->open->flags = (entry->open->flags & ~O_APPEND) | (flags & O_APPEND);
+    return 0;
+}

@@ -217,3 +217,49 @@ and verifies the actual i386 long/unsigned-long limits, 64-bit conversions,
 sorting, and realloc before the existing memory and filesystem regressions.
 Formatting, FILE streams, floating-point conversion and setjmp/longjmp remain
 separate work for the TinyCC port.
+
+The stdio layer now provides opaque `FILE` streams with `stdin`, `stdout`, and
+`stderr`; `fopen`/`fdopen`/`fclose`; `fread`/`fwrite`; `fseek`/`ftell`/`rewind`;
+`fgetc`/`getc`/`ungetc`/`fgets`; `fputc`/`putc`/`fputs`; `feof`/`ferror`/`clearerr`;
+`fileno`, `fflush`, and `remove`. `printf`, `puts`, `putchar`, and `getchar` use
+these standard streams.
+
+This first implementation is unbuffered: data is transferred before each call
+returns, and `fflush` has no pending output to write. It is not an fsync or a
+power-loss durability guarantee. There are 16 stream slots, including the three
+standard streams, in addition to the kernel's descriptor limit. Modes `r`, `w`,
+`a` and their `+`/`b` combinations are supported. `fdopen` checks descriptor
+access modes, does not truncate for `w`, and owns the descriptor only on success.
+Append uses the descriptor's O_APPEND flag, shared with dup/fork aliases.
+
+Reads/writes loop over short transfers and return the number of complete
+items, not bytes. EOF is sticky until clearerr, successful positioning, rewind,
+or ungetc; read errors set the separate error flag. One byte of pushback is
+supported. Seeking accounts for that byte, clears EOF on success, and fails on
+pipes. Positions remain limited by ZenOS's signed 32-bit lseek API. Callers must
+check fwrite/ferror/fclose results; unbuffered output cannot defer an error to
+fflush. Use valid streams and valid buffer pointers. There is no setvbuf,
+freopen, wide-character I/O, or thread synchronization yet.
+
+`<fcntl.h>` adds F_GETFL and F_SETFL (append only; other status flags are not
+supported). Access modes cannot be changed. `open` now accepts an optional
+creation-mode argument for source compatibility; creation still uses the
+filesystem's fixed 0644 permissions.
+
+Formatting now includes printf/vprintf, fprintf/vfprintf, sprintf/vsprintf,
+and snprintf/vsnprintf. Supported conversions: d, i, u, o, x, X, p, c, s, and %;
+integer lengths hh, h, l, ll, z, t, j; flags -, +, space, #, 0; literal or `*`
+width/precision. snprintf terminates when size is nonzero and returns the full
+length even when truncated; snprintf(NULL, 0, ...) can measure output. Pointers
+use hexadecimal with a 0x prefix (including 0x0 for NULL). Output lengths beyond
+INT_MAX fail with EOVERFLOW. Floating-point, wide-character, positional and %n
+formats are not supported and return EOF with EINVAL. Unsupported formats may
+leave partial output; they are never silently presented as correctly formatted.
+Input scanning such as sscanf remains future work.
+
+Run `python3 tests/stdio_host.py` for comparisons against host snprintf and
+stream tests using real host descriptors, short-transfer adapters and injected
+read/write/close errors. The QEMU `/stdiocheck` verifies the i386 varargs ABI,
+64-bit formatting, file modes and contents, fdopen ownership/append flags,
+EOF/pushback/seek behavior, pipes, broken-pipe errors, and stream exhaustion.
+The regular shell smoke runner builds and runs it automatically.
