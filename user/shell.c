@@ -182,7 +182,7 @@ static void run_command(const char *line) {
     }
 
     if (strcmp(line, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, cd, pwd, taskinfo, exit");
+        puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, meinkampf, cd, pwd, taskinfo, exit");
         puts("Use exit or Ctrl+D to leave the shell; Ctrl+D ends cat input.");
         return;
     }

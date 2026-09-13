@@ -39,6 +39,7 @@ enum {
     SYS_MKDIR   = 23,
     SYS_UNLINK  = 24,
     SYS_RMDIR   = 25,
+    SYS_RENAME  = 26,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -172,6 +173,23 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_EXIT:
             task_exit_current((int)regs->ebx, regs);
             break;
+
+        case SYS_RENAME: {
+            char old_path[256], new_path[256], old_abs[256], new_abs[256];
+            int result = -K_EFAULT;
+            if (copy_string_from_user(old_path, sizeof(old_path), (const char *)regs->ebx) == 0 &&
+                copy_string_from_user(new_path, sizeof(new_path), (const char *)regs->ecx) == 0) {
+                result = task_resolve_path(old_path, old_abs, sizeof(old_abs));
+                if (!result) result = task_resolve_path(new_path, new_abs, sizeof(new_abs));
+                if (!result) {
+                    task_preemption_disable();
+                    result = ext2_rename(old_abs, new_abs);
+                    task_preemption_enable();
+                }
+            }
+            regs->eax = (uint32_t)result;
+            break;
+        }
 
         case SYS_UNLINK:
         case SYS_RMDIR:

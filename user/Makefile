@@ -19,7 +19,7 @@ LIBS:=$(LIBS) ../userlibc/libc.a -nostdlib -lgcc
 # 不要加 -D__is_kernel
 # 不要链接 -lk
 
-TARGETS = shell hello cat ls echo mkdir rm rmdir
+TARGETS = shell hello cat ls echo mkdir rm rmdir meinkampf
 
 .PHONY: all clean userlibc
 .SUFFIXES: .o .c .S

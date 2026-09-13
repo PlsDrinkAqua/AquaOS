@@ -19,6 +19,25 @@ static void check_contents(int fd, const char *expected) {
 }
 
 int main(void) {
+    ERROR(rename((const char *)0, "/rename"), EFAULT);
+    ERROR(rename("/absent", "/rename"), ENOENT);
+    ERROR(open("/hello.txt", O_WRONLY | O_CREAT | O_EXCL), EEXIST);
+    int original = open("/rename-old", O_RDWR | O_CREAT | O_EXCL);
+    int newer = open("/rename-new.mk-tmp", O_RDWR | O_CREAT | O_EXCL);
+    CHECK(original >= 0 && newer >= 0);
+    CHECK(write(original, "old", 3) == 3 && write(newer, "new", 3) == 3);
+    CHECK(close(newer) == 0);
+    CHECK(rename("/rename-new.mk-tmp", "/rename-old") == 0);
+    ERROR(open("/rename-new.mk-tmp", O_RDONLY), ENOENT);
+    check_contents(original, "old");
+    CHECK(close(original) == 0);
+    newer = open("/rename-old", O_RDONLY);
+    CHECK(newer >= 0); check_contents(newer, "new"); CHECK(close(newer) == 0);
+    CHECK(rename("/rename-old", "/renamed") == 0);
+    CHECK(rename("/renamed", "/renamed") == 0);
+    ERROR(rename("/renamed", "/subdir/moved"), EXDEV);
+    ERROR(rename("/renamed", "/subdir"), EPERM);
+    CHECK(unlink("/renamed") == 0);
     ERROR(unlink((const char *)0), EFAULT);
     ERROR(rmdir((const char *)0), EFAULT);
     ERROR(unlink(""), ENOENT);

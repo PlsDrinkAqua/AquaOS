@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(block_size):
-    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck"], check=True,
+    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf"], check=True,
                    stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
@@ -34,7 +34,7 @@ def run(block_size):
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
@@ -114,6 +114,32 @@ def run(block_size):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            # Send editor input without the shell command helper's clear command.
+            command("meinkampf /edited", "meinkampf: /edited")
+
+            def editor_input(text, expected):
+                for char in text:
+                    qmp("human-monitor-command", {"command-line": f"sendkey {keys.get(char, char)} 10"})
+                    time.sleep(.025)
+                qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
+                time.sleep(.2)
+                return wait_for(expected)
+
+            editor_input("a first", "meinkampf*>")
+            editor_input("a last", "a last")
+            editor_input("i 2 middle", "i 2 middle")
+            editor_input("r 1 changed", "r 1 changed")
+            editor_input("d 3", "d 3")
+            editor_input("s", "saved 15 bytes")
+            editor_input("q", "exited from /meinkampf with status 0")
+            command("cat /edited", "\nchanged\nmiddle\n")
+            command("meinkampf /edited", "meinkampf: /edited")
+            editor_input("r 2 saved", "meinkampf*>")
+            editor_input("s", "saved 14 bytes")
+            editor_input("a discard", "a discard")
+            editor_input("q", "Discard unsaved changes?")
+            editor_input("y", "exited from /meinkampf with status 0")
+            command("cat /edited", "\nchanged\nsaved\n")
             command("memcheck", "memory reliability checks passed", seconds=90)
             command("fscheck", "filesystem deletion checks passed", seconds=90)
             command("mkdir /remove-me", "exited from /mkdir with status 0")
@@ -185,7 +211,11 @@ def run(block_size):
                                        text=True, capture_output=True, check=True)
             if persisted.stdout != "saved\n":
                 raise AssertionError("Directory contents did not persist: " + persisted.stdout)
-            for removed in ["/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
+            edited = subprocess.run(["debugfs", "-R", "cat /edited", str(disk)],
+                                    text=True, capture_output=True, check=True)
+            if edited.stdout != "changed\nsaved\n":
+                raise AssertionError("Editor save did not persist: " + edited.stdout)
+            for removed in ["/edited.mk-tmp", "/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
                 result = subprocess.run(["debugfs", "-R", f"stat {removed}", str(disk)],
                                         text=True, capture_output=True, check=True)
                 if "File not found" not in result.stderr:

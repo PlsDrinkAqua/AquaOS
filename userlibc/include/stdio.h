@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+int rename(const char *old_path, const char *new_path);
+
 int putchar(int);
 int getchar(void);
 int puts(const char*);

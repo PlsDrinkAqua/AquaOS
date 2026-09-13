@@ -39,6 +39,7 @@ int ext2_init(void);
 int ext2_lookup_inode(const char *path, uint32_t *ino);
 int ext2_remove(const char *path, int directory);
 int ext2_reclaim_unlinked(uint32_t ino);
+int ext2_rename(char *old_path, char *new_path);
 int ext2_mkdir(const char *path);
 void ext2_selftest(void);
 int ext2_file_open(const char *path, int flags, ext2_file_t *file);

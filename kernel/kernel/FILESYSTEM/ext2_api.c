@@ -17,6 +17,7 @@
 #define O_RDONLY 0
 #define O_CREAT  0x40
 #define O_TRUNC  0x200
+#define O_EXCL   0x80
 
 static uint32_t block_size(void) { return 1024U << ext2_sb()->s_log_block_size; }
 static uint32_t dir_rec_size(uint32_t name_len) { return (8 + name_len + 3) & ~3U; }
@@ -327,6 +328,103 @@ done:
     return result;
 }
 
+/* Initial rename API: regular files within one directory. Stage all directory
+ * edits in memory so ordinary validation/allocation errors leave names intact.
+ * As with other ext2 mutations, disk failure/crash recovery is not journaled. */
+static int rename_parent(char *path, uint32_t *parent, const char **name) {
+    size_t length = kstrlen(path), start = length;
+    if (!length) return -K_ENOENT;
+    if (path[length - 1] == '/') return -K_EINVAL;
+    while (start && path[start - 1] != '/') start--;
+    *name = path + start;
+    if (!kstrcmp(*name, ".") || !kstrcmp(*name, "..")) return -K_EINVAL;
+    if (length - start > EXT2_NAME_MAX) return -K_ENAMETOOLONG;
+    if (start) path[start - 1] = 0;
+    return resolve_path(start && *path ? path : "/", 0, parent);
+}
+
+int ext2_rename(char *old_path, char *new_path) {
+    uint32_t parent_no, other_parent, source_no, target_no = 0;
+    const char *old_name, *new_name;
+    struct ext2_inode parent, source, target;
+    int result = rename_parent(old_path, &parent_no, &old_name);
+    if (result < 0) return result;
+    result = rename_parent(new_path, &other_parent, &new_name);
+    if (result < 0) return result;
+    if (parent_no != other_parent) return -K_EXDEV;
+    result = lookup(parent_no, old_name, &source_no);
+    if (result < 0) return result;
+    if (ext2_read_inode(source_no, &source) < 0) return -K_EIO;
+    if ((source.i_mode & EXT2_S_IFMT) != EXT2_S_IFREG) return -K_EPERM;
+    result = lookup(parent_no, new_name, &target_no);
+    if (result < 0 && result != -K_ENOENT) return result;
+    if (target_no == source_no) return 0;
+    if (target_no) {
+        if (ext2_read_inode(target_no, &target) < 0) return -K_EIO;
+        if ((target.i_mode & EXT2_S_IFMT) != EXT2_S_IFREG) return -K_EPERM;
+        if (!target.i_links_count) return -K_EIO;
+        if (target.i_block[13] || target.i_block[14]) return -K_EFBIG;
+        if (target.i_file_acl) return -K_ENOSYS;
+    }
+    if (ext2_read_inode(parent_no, &parent) < 0) return -K_EIO;
+    uint32_t bs = block_size(), size = parent.i_size_lo;
+    if (!size || size % bs) return -K_EIO;
+    uint8_t *before = kmalloc(size), *after = kmalloc(size);
+    if (!before || !after) { kfree(before); kfree(after); return -K_ENOMEM; }
+    struct ext2_dir_entry_2 *src = NULL, *dst = NULL;
+    result = -K_EIO;
+    for (uint32_t base = 0; base < size; base += bs) {
+        uint32_t block;
+        if (inode_block(&parent, base / bs, &block) < 0 || !block ||
+            ext2_read_block(block, before + base) < 0) goto done;
+    }
+    kmemcpy(after, before, size);
+    for (uint32_t offset = 0; offset < size;) {
+        if (bs - offset % bs < 8) goto done;
+        struct ext2_dir_entry_2 *de = (void *)(after + offset);
+        if (de->rec_len < 8 || (de->rec_len & 3) ||
+            de->rec_len > bs - offset % bs || de->name_len > de->rec_len - 8) goto done;
+        if (de->inode == source_no && de->name_len == kstrlen(old_name) &&
+            !kmemcmp(de->name, old_name, de->name_len)) src = de;
+        if (target_no && de->inode == target_no && de->name_len == kstrlen(new_name) &&
+            !kmemcmp(de->name, new_name, de->name_len)) dst = de;
+        offset += de->rec_len;
+    }
+    if (!src || (target_no && !dst)) goto done;
+    if (!dst) {
+        /* The editor's temporary name is longer than its destination name. */
+        if (src->rec_len < dir_rec_size(kstrlen(new_name))) { result = -K_ENOSPC; goto done; }
+        src->name_len = kstrlen(new_name);
+        kmemcpy(src->name, new_name, src->name_len);
+    } else {
+        dst->inode = source_no;
+        dst->file_type = EXT2_FT_REG_FILE;
+        src->inode = 0; src->name_len = 0; src->file_type = 0;
+    }
+    for (uint32_t base = 0; base < size; base += bs) {
+        uint32_t block;
+        if (!kmemcmp(before + base, after + base, bs)) continue;
+        if (inode_block(&parent, base / bs, &block) < 0 ||
+            ext2_write_block(block, after + base) < 0) {
+            /* Best-effort rollback on an I/O error, including the failed block. */
+            for (uint32_t rollback = 0; rollback <= base; rollback += bs) {
+                if (inode_block(&parent, rollback / bs, &block) == 0)
+                    ext2_write_block(block, before + rollback);
+            }
+            result = -K_EIO; goto done;
+        }
+    }
+    result = 0;
+    if (target_no) {
+        target.i_links_count--;
+        if (ext2_write_inode(target_no, &target) < 0) { result = -K_EIO; goto done; }
+        result = ext2_reclaim_unlinked(target_no);
+    }
+done:
+    kfree(before); kfree(after);
+    return result;
+}
+
 int ext2_mkdir(const char *path) {
     if (!path || !*path) return -K_ENOENT;
     size_t length = kstrlen(path);
@@ -409,6 +507,11 @@ int ext2_file_open(const char *path, int flags, ext2_file_t *file) {
     struct ext2_inode inode;
     int result;
     if (!file || !path || !*path || (flags & O_ACCMODE) == O_ACCMODE) return -K_EINVAL;
+    if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
+        result = resolve_path(path, 0, &ino);
+        if (!result) return -K_EEXIST;
+        if (result != -K_ENOENT) return result;
+    }
     result = resolve_path(path, (flags & O_CREAT) != 0, &ino);
     if (result < 0) return result;
     if (ext2_read_inode(ino, &inode) < 0) return -K_EIO;

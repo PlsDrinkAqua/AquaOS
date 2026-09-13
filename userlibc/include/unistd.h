@@ -12,6 +12,7 @@ typedef int off_t;
 #define O_RDWR   2
 #define O_ACCMODE 3
 #define O_CREAT  0x40
+#define O_EXCL   0x80
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
 #define SEEK_SET 0

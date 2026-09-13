@@ -14,6 +14,7 @@
 #define K_EACCES  13
 #define K_EFAULT  14
 #define K_EBUSY   16
+#define K_EXDEV 18
 #define K_EEXIST  17
 #define K_ENOTDIR 20
 #define K_EISDIR  21
