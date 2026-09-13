@@ -11,7 +11,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size):
+def run(block_size, tinycc=False):
+    if tinycc and block_size != 4096:
+        raise ValueError("TinyCC runtime archives require --block-size 4096")
     subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck"], check=True,
                    stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
@@ -36,6 +38,13 @@ def run(block_size):
                      "symlink /fscheck-symlink /hello.txt"]
         programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
+        if tinycc:
+            tree = ROOT / "ports/tinycc/root"
+            if not (tree / "tcc").is_file():
+                raise RuntimeError("Run python3 ports/tinycc/build.py first")
+            for entry in sorted(tree.rglob("*"), key=lambda p: (len(p.parts), str(p))):
+                target = "/" + entry.relative_to(tree).as_posix()
+                commands.append(f"mkdir {target}" if entry.is_dir() else f'write "{entry}" "{target}"')
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
         subprocess.run(["debugfs", "-w", "-f", str(batch), str(disk)],
@@ -114,6 +123,19 @@ def run(block_size):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            if tinycc:
+                command("tcc hello.c -o native-hello", "exited from /tcc with status 0", seconds=60)
+                command("./native-hello", "Hello from native TinyCC!")
+                command("tcc nativecheck.c companion.c -o nativecheck", "exited from /tcc with status 0", seconds=60)
+                command("./nativecheck", "native compiler checks passed")
+                command("tcc -c companion.c -o companion.o", "exited from /tcc with status 0", seconds=60)
+                command("tcc nativecheck.c companion.o -o nativecheck", "exited from /tcc with status 0", seconds=60)
+                command("./nativecheck", "native compiler checks passed")
+                command("tcc bad.c -o bad", "exited from /tcc with status 1", seconds=60)
+                command("tcc missing.c -o missing", "exited from /tcc with status 1", seconds=60)
+                command("tcc hello.c -o /no-dir/hello", "exited from /tcc with status 1", seconds=60)
+                command("tcc hello.c -o native-hello", "exited from /tcc with status 0", seconds=60)
+                command("./native-hello", "Hello from native TinyCC!")
             # Send editor input without the shell command helper's clear command.
             command("meinkampf /edited", "meinkampf: /edited")
 
@@ -232,4 +254,6 @@ def run(block_size):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--block-size", type=int, choices=[1024, 4096], default=1024)
-    run(parser.parse_args().block_size)
+    parser.add_argument("--tinycc", action="store_true", help="exercise the staged native TinyCC port")
+    args = parser.parse_args()
+    run(args.block_size, args.tinycc)

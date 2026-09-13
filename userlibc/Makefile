@@ -18,6 +18,7 @@ TARGET=libc.a
 
 OBJS=\
 errno/errno.o \
+setjmp/setjmp.o \
 stdio/getchar.o \
 stdio/printf.o \
 stdio/putchar.o \
@@ -63,7 +64,7 @@ zenos/task.o \
 zenos/terminal.o
 
 .PHONY: all clean
-.SUFFIXES: .o .c
+.SUFFIXES: .o .c .S
 
 all: $(TARGET) crt0.o
 
@@ -72,6 +73,9 @@ $(TARGET): $(OBJS)
 
 crt0.o: crt0.S
 	$(CC) -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
+
+.S.o:
+	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
 .c.o:
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)

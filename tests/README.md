@@ -215,8 +215,8 @@ Run `sh tests/libc_host.sh` for memory/string/conversion/sorting checks and
 storage exhaustion). The QEMU smoke runner builds the test-only `/libccheck`
 and verifies the actual i386 long/unsigned-long limits, 64-bit conversions,
 sorting, and realloc before the existing memory and filesystem regressions.
-The stdio and floating-point additions are described below. setjmp/longjmp
-remains separate work for the TinyCC port.
+The stdio and floating-point additions are described below. The native TinyCC
+port now also supplies i386 setjmp/longjmp and installed compiler headers.
 
 The stdio layer now provides opaque `FILE` streams with `stdin`, `stdout`, and
 `stderr`; `fopen`/`fdopen`/`fclose`; `fread`/`fwrite`; `fseek`/`ftell`/`rewind`;
@@ -314,3 +314,25 @@ field widths, scansets, failures and end pointers against the host libc. The
 QEMU `/stdiocheck` also exercises actual float/double/long-double parsing and
 formatting, live x87/SSE registers across yields/timer interrupts, fork inheritance
 of rounding controls, and exec reset to the default floating-point environment.
+
+Native TinyCC milestone:
+
+```sh
+python3 ports/tinycc/build.py
+make -C user
+sh iso.sh
+python3 tests/shell_smoke.py --block-size 4096 --tinycc
+```
+
+The optional native compiler checks install the staged `ports/tinycc/root` tree
+on the disposable disk. They compile and execute a greeting, multi-file and
+object-file programs; verify varargs, 64-bit arithmetic, floating-point parsing
+and formatting, and setjmp/longjmp (including longjmp's zero-to-one rule); then
+exercise bad syntax, missing headers and output-open failure before another
+successful compilation. The regular smoke suite runs afterward. A 4 KiB ext2
+image is required because the runtime archives exceed 1 KiB-block file limits.
+
+`python3 ports/tinycc/make_disk.py` creates a separate development
+disk at `disk/zenos-dev.img` with `/tcc`, headers, libraries and `/hello.c`; boot
+it together with `myos.iso`. It never overwrites an existing disk. See
+`ports/tinycc/README.md` for the boot command, implementation details and limits.

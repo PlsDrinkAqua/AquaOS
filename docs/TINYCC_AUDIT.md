@@ -1,20 +1,23 @@
 # TinyCC dependency audit for ZenOS
 
-Implementation update: ZenOS now provides FILE streams (unbuffered), integer,
-string and floating-point printf formatting, sscanf/vsscanf, strtof/strtod/
-strtold, ldexp and supporting x87 math helpers, ASCII ctype, fcntl access/append
-handling, and variadic open source compatibility. The earlier realloc,
-memory/string routines, integer conversion and qsort batch is also implemented.
-The kernel now provides a 256 KiB user stack with a guard page and per-task
-x87/SSE initialization, context switching, fork inheritance and exec reset.
-Host and QEMU tests exercise these additions; see tests/README.md for the
-supported subsets and validation commands.
+Implementation update: the first native TinyCC milestone is implemented in
+`ports/tinycc/`. The pinned compiler builds against ZenOS libc and runs inside
+ZenOS to compile/link static i386 executables. QEMU checks cover a greeting,
+multi-source/object builds, arithmetic, floating point, varargs, nonlocal jumps,
+and recovery from bad syntax/missing headers/failed output opening. Build and
+installation instructions and current limits are in `ports/tinycc/README.md`.
 
-The tables and platform findings below preserve the original audit snapshot;
-the additions above are no longer missing. setjmp/longjmp, time/environment
-adaptations, compiler-independent headers, TinyCC configuration/build work and
-end-to-end compilation on ZenOS remain. These library tests do not establish
-that TinyCC itself is ported.
+ZenOS now provides the earlier memory/string/conversion/stdio batches, a 256 KiB
+user stack, per-task x87/SSE handling, and i386 setjmp/longjmp. Compiler headers,
+startup/runtime installation, fixed search paths, deterministic date/time
+fallbacks and compile-to-file feature gates are provided by the port. The
+compiler defaults to static linking and uses ZenOS crt0/libc plus libtcc1/libgcc.
+
+The tables and platform findings below preserve the original audit snapshot.
+They are historical findings, not the current missing-dependency list. Native
+TinyCC self-rebuilding, broad application compatibility, large-project resource
+measurements, full time/environment APIs, and dynamic execution remain future
+milestones. The first working compiler does not establish those capabilities.
 
 Baseline: TinyCC `release_0_9_27`, commit
 `d348a9a51d32cece842b7885d27a411436d7887b`.
