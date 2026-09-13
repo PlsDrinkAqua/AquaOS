@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(block_size):
-    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf"], check=True,
+    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck"], check=True,
                    stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
@@ -34,7 +34,7 @@ def run(block_size):
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
@@ -140,6 +140,7 @@ def run(block_size):
             editor_input("q", "Discard unsaved changes?")
             editor_input("y", "exited from /meinkampf with status 0")
             command("cat /edited", "\nchanged\nsaved\n")
+            command("libccheck", "libc core checks passed")
             command("memcheck", "memory reliability checks passed", seconds=90)
             command("fscheck", "filesystem deletion checks passed", seconds=90)
             command("mkdir /remove-me", "exited from /mkdir with status 0")

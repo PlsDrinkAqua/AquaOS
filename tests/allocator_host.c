@@ -8,6 +8,7 @@
 void *kmalloc(size_t);
 void kfree(void *);
 void *zenos_malloc(size_t);
+void *zenos_realloc(void *, size_t);
 void zenos_free(void *);
 void *zenos_calloc(size_t, size_t);
 static _Alignas(4096) unsigned char kernel_arena[65536], user_arena[65536];
@@ -72,6 +73,20 @@ static void user_checks(void) {
     void *c = zenos_malloc(9000); assert(c); memset(c, 0xa5, 9000);
     for (int i = 0; i < 4096; i++) assert(gap[i] == 0x5a);
     zenos_free(c);
+    unsigned char *p = zenos_malloc(64);
+    assert(p); memset(p, 0x3a, 64);
+    void *guard = zenos_malloc(512); assert(guard);
+    void *failed = zenos_realloc(p, 100000);
+    assert(!failed);
+    for (int i = 0; i < 64; i++) assert(p[i] == 0x3a);
+    unsigned char *moved = zenos_realloc(p, 2000); assert(moved);
+    for (int i = 0; i < 64; i++) assert(moved[i] == 0x3a);
+    assert(zenos_realloc(moved, 8) == moved);
+    assert(zenos_realloc(moved, SIZE_MAX) == NULL && moved[0] == 0x3a);
+    assert(zenos_realloc(moved, 0) == NULL);
+    zenos_free(guard);
+    p = zenos_malloc(64); guard = zenos_malloc(512); assert(p && guard);
+    zenos_free(guard); assert(zenos_realloc(p, 128) == p); zenos_free(p);
 }
 int main(int argc, char **argv) {
     (void)argv;

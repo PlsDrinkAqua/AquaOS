@@ -155,3 +155,34 @@ void *calloc(size_t nmemb, size_t size) {
 
     return ptr;
 }
+
+/* A failed growth leaves the original allocation owned by the caller. */
+void *realloc(void *ptr, size_t size) {
+    if (!ptr) return malloc(size);
+    if (!size) { free(ptr); return NULL; }
+    if (size > (size_t)INTPTR_MAX - sizeof(malloc_block_t) - (CHUNK_SIZE - 1)) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    malloc_block_t *block = (malloc_block_t *)ptr - 1;
+    size_t aligned = align_up(size, MALLOC_ALIGN);
+    if (aligned <= block->size) {
+        split_block(block, aligned);
+        coalesce_free_blocks();
+        return ptr;
+    }
+    malloc_block_t *next = block->next;
+    if (next && next->free && (uint8_t *)(block + 1) + block->size == (uint8_t *)next &&
+        block->size + sizeof(*next) + next->size >= aligned) {
+        block->size += sizeof(*next) + next->size;
+        block->next = next->next;
+        if (heap_tail == next) heap_tail = block;
+        split_block(block, aligned);
+        return ptr;
+    }
+    void *replacement = malloc(size);
+    if (!replacement) return NULL;
+    for (size_t i = 0; i < block->size; i++) ((uint8_t *)replacement)[i] = ((uint8_t *)ptr)[i];
+    free(ptr);
+    return replacement;
+}

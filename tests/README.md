@@ -190,3 +190,30 @@ It compiles the editor with host file-API adapters. The QEMU smoke suite also
 creates, edits, saves, reopens and replaces a file with the actual `meinkampf`
 command; offline debugfs and e2fsck verify the result. The filesystem helper tests
 exclusive creation and rename while a replaced file remains open.
+
+The first TinyCC libc batch adds:
+
+- `realloc` (preserves contents, grows into adjacent free space when possible,
+  and leaves the old allocation valid on failure). `realloc(NULL, n)` allocates;
+  `realloc(p, 0)` frees and returns NULL.
+- `memcpy`, overlap-safe `memmove`, `memset`, and unsigned-byte `memcmp`.
+- `strcpy`, `strchr`, `strrchr`, and `strstr`.
+- `atoi`, `strtol`, `strtoul`, `strtoll`, and `strtoull`.
+- `qsort`, using allocation-free heapsort with bounded stack usage and
+  O(n log n) worst-case running time. Equal elements need not remain ordered.
+
+Integer parsing uses C99-style syntax: ASCII whitespace, optional signs, bases
+2 through 36, and base 0 detection of octal/decimal/hexadecimal. A hexadecimal
+prefix requires a following hex digit. There is no `0b` prefix or locale support.
+No conversion leaves endptr at the original input. Overflow saturates to the
+appropriate type limit, sets ERANGE, and consumes all valid digits. Invalid
+bases return zero with EINVAL and endptr at the original input. Successful
+conversions do not clear errno. These functions require valid string pointers.
+
+Run `sh tests/libc_host.sh` for memory/string/conversion/sorting checks and
+`sh tests/allocator_host.sh` for allocator/realloc checks (including real backing
+storage exhaustion). The QEMU smoke runner builds the test-only `/libccheck`
+and verifies the actual i386 long/unsigned-long limits, 64-bit conversions,
+sorting, and realloc before the existing memory and filesystem regressions.
+Formatting, FILE streams, floating-point conversion and setjmp/longjmp remain
+separate work for the TinyCC port.

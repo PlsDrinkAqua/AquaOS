@@ -25,6 +25,10 @@ stdio/puts.o \
 stdio/rename.o \
 stdlib/exit.o \
 stdlib/malloc.o \
+stdlib/strto.o \
+stdlib/qsort.o \
+string/memory.o \
+string/search.o \
 string/strcmp.o \
 string/strncmp.o \
 string/strlen.o \
