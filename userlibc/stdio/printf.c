@@ -44,7 +44,8 @@ static int decimal(const char **format, int *value) {
     }
     return 0;
 }
-enum { NORMAL, HH, H, L, LL, Z, T, J };
+#include "float_format.inc"
+enum { NORMAL, HH, H, L, LL, Z, T, J, LONG_DOUBLE };
 
 static int format(output_t *out, const char *fmt, va_list incoming) {
     va_list args; va_copy(args, incoming);
@@ -78,12 +79,23 @@ static int format(output_t *out, const char *fmt, va_list incoming) {
         }
         if (*fmt == 'h') { fmt++; length = H; if (*fmt == 'h') { fmt++; length = HH; } }
         else if (*fmt == 'l') { fmt++; length = L; if (*fmt == 'l') { fmt++; length = LL; } }
+        else if (*fmt == 'L') { fmt++; length = LONG_DOUBLE; }
         else if (*fmt == 'z') { fmt++; length = Z; }
         else if (*fmt == 't') { fmt++; length = T; }
         else if (*fmt == 'j') { fmt++; length = J; }
         char spec = *fmt;
         if (!spec) goto unsupported;
         fmt++;
+        if (spec == 'f' || spec == 'F' || spec == 'e' || spec == 'E' ||
+            spec == 'g' || spec == 'G' || spec == 'a' || spec == 'A') {
+            if (length != NORMAL && length != L && length != LONG_DOUBLE) goto unsupported;
+            long double value = length == LONG_DOUBLE ? va_arg(args, long double) : va_arg(args, double);
+            int flags = (left ? LEFT_ADJ : 0) | (plus ? MARK_POS : 0) | (space ? PAD_POS : 0) |
+                        (alternate ? ALT_FORM : 0) | (zero ? ZERO_PAD : 0);
+            if (fmt_fp(out, value, width, precision, flags, spec, length == LONG_DOUBLE) < 0) goto overflow;
+            continue;
+        }
+        if (length == LONG_DOUBLE) goto unsupported;
         if (spec == 's' || spec == 'c' || spec == '%') {
             if (length != NORMAL) goto unsupported;
             char c;

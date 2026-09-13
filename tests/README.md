@@ -215,8 +215,8 @@ Run `sh tests/libc_host.sh` for memory/string/conversion/sorting checks and
 storage exhaustion). The QEMU smoke runner builds the test-only `/libccheck`
 and verifies the actual i386 long/unsigned-long limits, 64-bit conversions,
 sorting, and realloc before the existing memory and filesystem regressions.
-Formatting, FILE streams, floating-point conversion and setjmp/longjmp remain
-separate work for the TinyCC port.
+The stdio and floating-point additions are described below. setjmp/longjmp
+remains separate work for the TinyCC port.
 
 The stdio layer now provides opaque `FILE` streams with `stdin`, `stdout`, and
 `stderr`; `fopen`/`fdopen`/`fclose`; `fread`/`fwrite`; `fseek`/`ftell`/`rewind`;
@@ -247,15 +247,59 @@ creation-mode argument for source compatibility; creation still uses the
 filesystem's fixed 0644 permissions.
 
 Formatting now includes printf/vprintf, fprintf/vfprintf, sprintf/vsprintf,
-and snprintf/vsnprintf. Supported conversions: d, i, u, o, x, X, p, c, s, and %;
+and snprintf/vsnprintf. Supported conversions: d, i, u, o, x, X, p, c, s, %,
+f, F, e, E, g, G, a, and A;
 integer lengths hh, h, l, ll, z, t, j; flags -, +, space, #, 0; literal or `*`
 width/precision. snprintf terminates when size is nonzero and returns the full
 length even when truncated; snprintf(NULL, 0, ...) can measure output. Pointers
 use hexadecimal with a 0x prefix (including 0x0 for NULL). Output lengths beyond
-INT_MAX fail with EOVERFLOW. Floating-point, wide-character, positional and %n
-formats are not supported and return EOF with EINVAL. Unsupported formats may
+INT_MAX fail with EOVERFLOW. Floating formats accept double (including the `l`
+modifier) and 80-bit long double (`L`), with rounding, NaN, infinity and signed
+zero support. Wide-character, positional and printf %n formats are not
+supported and return EOF with EINVAL. Unsupported formats may
 leave partial output; they are never silently presented as correctly formatted.
-Input scanning such as sscanf remains future work.
+String input scanning provides `sscanf` and `vsscanf`: signed/unsigned integers,
+base detection (`%i`), hexadecimal pointers, floating conversions, `%s`, `%c`,
+scansets (`%[...]`, `%[^...]`, ascending ranges), whitespace/literals, field
+widths, assignment suppression (`*`), and `%n` character counts. Integer lengths
+are hh/h/l/ll/j/z/t. Floating destinations are float for `%f`/`%e`/`%g`/`%a`,
+double for `%lf`, and long double for `%Lf` (uppercase conversions also work).
+The result counts assigned values; suppression and `%n` do not add to it.
+Input failure before any assignment returns EOF; a matching failure returns
+the assignments so far. Incomplete numeric tokens such as `100e+` fail to
+convert. `%c` requires its full width and does not add a terminator.
+
+Use a width at most buffer size minus one for `%s` and scansets. Numeric
+scanf destinations must be large enough for the result; use the strto family
+when integer range checking is needed. Scanning uses the ASCII C locale;
+wide characters, positional arguments, allocation extensions and FILE-based
+`scanf`/`fscanf` are not implemented. Invalid/unsupported formats set EINVAL
+and return the assignments so far, or EOF when there are none.
+
+```c
+int line;
+double value;
+char name[32];
+if (sscanf("12 3.5 source.c", "%d %lf %31s", &line, &value, name) == 3)
+    printf("%s:%d = %.2f\n", name, line, value);
+```
+
+`strtof`, `strtod`, and `strtold` parse decimal/hexadecimal floats and inf/nan,
+return an end pointer, and report range errors through ERANGE. Unlike scanf,
+an incomplete exponent is left unconsumed: `strtod("1e+", &end)` returns 1
+with end pointing at `e+`. No conversion leaves end at the original string.
+`<ctype.h>` supplies ASCII classification/case conversion; `<math.h>` supplies
+classification macros and the small x87 helper set used by numeric conversion,
+including `ldexp`. It is not a complete mathematical library.
+
+Floating formatting/parsing adapts musl's MIT-licensed conversion algorithms;
+see `userlibc/licenses/README.md` for provenance and the retained license.
+ZenOS now initializes x87/SSE and saves/restores their state per task. fork
+inherits the state; exec/spawn start with the default environment. The kernel
+requires an x86 CPU with FXSR and SSE (the default QEMU CPU supports these).
+Kernel C code must remain free of floating-point/SSE calculations. Each process
+now has a 256 KiB eagerly mapped user stack and an unmapped guard page below it;
+ELF images overlapping that reserved region are rejected.
 
 Run `python3 tests/stdio_host.py` for comparisons against host snprintf and
 stream tests using real host descriptors, short-transfer adapters and injected
@@ -263,3 +307,10 @@ read/write/close errors. The QEMU `/stdiocheck` verifies the i386 varargs ABI,
 64-bit formatting, file modes and contents, fdopen ownership/append flags,
 EOF/pushback/seek behavior, pipes, broken-pipe errors, and stream exhaustion.
 The regular shell smoke runner builds and runs it automatically.
+
+Numeric host checks compare hundreds of deterministic floating-point values,
+boundaries, rounding/truncation, long-double extremes, scanf destination types,
+field widths, scansets, failures and end pointers against the host libc. The
+QEMU `/stdiocheck` also exercises actual float/double/long-double parsing and
+formatting, live x87/SSE registers across yields/timer interrupts, fork inheritance
+of rounding controls, and exec reset to the default floating-point environment.

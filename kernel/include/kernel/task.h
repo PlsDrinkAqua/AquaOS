@@ -6,6 +6,7 @@
 #include <kernel/interrupt_frame.h>
 #include <kernel/paging.h>
 
+#define USER_STACK_BYTES (256U * 1024U)
 #define USER_STACK_TOP 0xBFFFE000U
 #define TASK_KERNEL_STACK_BYTES 4096U
 #define TASK_IMAGE_PATH_BYTES 256U
@@ -45,6 +46,7 @@ typedef struct task {
     fd_entry_t fds[TASK_FD_MAX];
     interrupt_frame_t saved_regs;
     int exit_status;
+    uint8_t fpu_state[512] __attribute__((aligned(16)));
 } task_t;
 
 int task_resolve_path(const char *path, char *out, size_t size);

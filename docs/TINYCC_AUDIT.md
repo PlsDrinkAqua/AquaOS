@@ -1,15 +1,20 @@
 # TinyCC dependency audit for ZenOS
 
-Implementation update: FILE streams and integer/string formatting are now also
-available, along with fcntl access/append handling and variadic open source
-compatibility. Streams are initially unbuffered. Floating-point formatting,
-sscanf and the other pending runtime dependencies still require work.
+Implementation update: ZenOS now provides FILE streams (unbuffered), integer,
+string and floating-point printf formatting, sscanf/vsscanf, strtof/strtod/
+strtold, ldexp and supporting x87 math helpers, ASCII ctype, fcntl access/append
+handling, and variadic open source compatibility. The earlier realloc,
+memory/string routines, integer conversion and qsort batch is also implemented.
+The kernel now provides a 256 KiB user stack with a guard page and per-task
+x87/SSE initialization, context switching, fork inheritance and exec reset.
+Host and QEMU tests exercise these additions; see tests/README.md for the
+supported subsets and validation commands.
 
-Implementation update: the first libc batch now provides realloc, memcpy,
-memmove, memset, memcmp, strcpy, strchr, strrchr, strstr, atoi, strtol, strtoul,
-strtoll, strtoull and qsort. The tables below preserve the original audit
-snapshot; these entries are no longer missing. See tests/README.md for
-semantics and validation commands.
+The tables and platform findings below preserve the original audit snapshot;
+the additions above are no longer missing. setjmp/longjmp, time/environment
+adaptations, compiler-independent headers, TinyCC configuration/build work and
+end-to-end compilation on ZenOS remain. These library tests do not establish
+that TinyCC itself is ported.
 
 Baseline: TinyCC `release_0_9_27`, commit
 `d348a9a51d32cece842b7885d27a411436d7887b`.

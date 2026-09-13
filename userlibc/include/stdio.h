@@ -40,6 +40,8 @@ int remove(const char *path);
 int putchar(int c);
 int getchar(void);
 int puts(const char *s);
+int sscanf(const char *text, const char *format, ...);
+int vsscanf(const char *text, const char *format, va_list args);
 int printf(const char *format, ...);
 int vprintf(const char *format, va_list args);
 int fprintf(FILE *stream, const char *format, ...);

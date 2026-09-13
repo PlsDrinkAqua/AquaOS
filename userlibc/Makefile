@@ -24,6 +24,10 @@ stdio/putchar.o \
 stdio/puts.o \
 stdio/rename.o \
 stdio/streams.o \
+stdio/sscanf.o \
+stdio/floatscan.o \
+stdlib/strtof.o \
+math/x87.o \
 stdlib/exit.o \
 stdlib/malloc.o \
 stdlib/strto.o \

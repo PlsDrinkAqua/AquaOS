@@ -32,6 +32,35 @@ extern page_directory_t boot_page_directory;
 
 #define KERNEL_VIRT_OFFSET 0xC0000000U
 
+static uint8_t initial_fpu[512] __attribute__((aligned(16)));
+static task_t *fpu_owner;
+
+static void fpu_init(void) {
+    uint32_t a, b, c, d, cr;
+    __asm__ volatile ("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
+    if ((d & ((1U << 24) | (1U << 25))) != ((1U << 24) | (1U << 25))) {
+        kprintf("ZenOS requires FXSR and SSE for floating-point contexts\n");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
+    __asm__ volatile ("mov %%cr0, %0" : "=r"(cr));
+    cr = (cr & ~12U) | 34U; /* Clear EM/TS, enable MP/NE. */
+    __asm__ volatile ("mov %0, %%cr0" :: "r"(cr) : "memory");
+    __asm__ volatile ("mov %%cr4, %0" : "=r"(cr));
+    cr |= (1U << 9) | (1U << 10);
+    __asm__ volatile ("mov %0, %%cr4" :: "r"(cr) : "memory");
+    uint32_t mxcsr = 0x1f80;
+    __asm__ volatile ("fninit; ldmxcsr %0; xorps %%xmm0, %%xmm0; xorps %%xmm1, %%xmm1;"
+                      "xorps %%xmm2, %%xmm2; xorps %%xmm3, %%xmm3; xorps %%xmm4, %%xmm4;"
+                      "xorps %%xmm5, %%xmm5; xorps %%xmm6, %%xmm6; xorps %%xmm7, %%xmm7"
+                      :: "m"(mxcsr) : "memory");
+    __asm__ volatile ("fxsave %0" : "=m"(initial_fpu));
+    fpu_owner = NULL;
+}
+static void fpu_reset(task_t *task) {
+    kmemcpy(task->fpu_state, initial_fpu, sizeof(initial_fpu));
+    if (fpu_owner == task) __asm__ volatile ("fxrstor %0" :: "m"(task->fpu_state));
+}
+
 static const char *task_state_name(task_state_t state) {
     switch (state) {
         case TASK_UNUSED:
@@ -215,6 +244,7 @@ static task_t *task_alloc(void) {
             task_table[i].state = TASK_UNUSED;
             task_table[i].user_stack_top = USER_STACK_TOP;
             fd_table_init(&task_table[i]);
+            fpu_reset(&task_table[i]);
             return &task_table[i];
         }
     }
@@ -255,6 +285,11 @@ static void task_free_kernel_stack(task_t *task) {
 }
 
 static void task_switch_to(task_t *task) {
+    if (fpu_owner != task) {
+        if (fpu_owner) __asm__ volatile ("fxsave %0" : "=m"(fpu_owner->fpu_state));
+        __asm__ volatile ("fxrstor %0" :: "m"(task->fpu_state));
+        fpu_owner = task;
+    }
     current_task = task;
     vmm_switch_address_space(task->address_space);
     tss_set_kernel_stack(task->kernel_stack_top);
@@ -333,26 +368,21 @@ static int task_copy_args(exec_args_t *args, const char *const *argv) {
 
 static int task_prepare_user_stack(task_t *task, const char *path,
                                    const exec_args_t *args) {
-    uintptr_t stack_page = USER_STACK_TOP - PAGE_SIZE;
-
-    if (!vmm_translate(stack_page)) {
+    /* Reject an ELF image overlapping the stack or its guard page. */
+    for (uintptr_t page = USER_STACK_TOP - USER_STACK_BYTES - PAGE_SIZE;
+         page < USER_STACK_TOP; page += PAGE_SIZE) {
+        if (vmm_translate(page)) return -1;
+    }
+    for (uintptr_t stack_page = USER_STACK_TOP - USER_STACK_BYTES;
+         stack_page < USER_STACK_TOP; stack_page += PAGE_SIZE) {
         uint32_t stack_phys = pmm_alloc_frame();
-        if (!stack_phys) {
-            return -1;
-        }
-
+        if (!stack_phys) return -1;
         if (vmm_map_page(stack_page, stack_phys, VMM_PRESENT | VMM_RW | VMM_USER) < 0) {
             pmm_free_frame(stack_phys);
             return -1;
         }
+        kmemset((void *)stack_page, 0, PAGE_SIZE);
     }
-
-    if (!vmm_user_range_valid((void *)stack_page, PAGE_SIZE, true)) {
-        kprintf("task: stack mapping is not writable at 0x%x\n", stack_page);
-        return -1;
-    }
-
-    kmemset((void *)stack_page, 0, PAGE_SIZE);
     unsigned argc = args ? args->count : 1;
     uint32_t pointers[EXEC_ARG_MAX];
     uintptr_t sp = USER_STACK_TOP;
@@ -440,7 +470,9 @@ static int task_create_and_load_image(task_t *task, const char *path) {
 }
 
 void tasking_init(void) {
+    fpu_init();
     kmemset(task_table, 0, sizeof(task_table));
+    fpu_reset(&task_table[0]);
     task_table[0].pid = next_pid++;
     task_table[0].state = TASK_UNUSED;
     task_table[0].user_stack_top = USER_STACK_TOP;
@@ -509,6 +541,7 @@ int task_exec_current(const char *path, const char *const *argv, interrupt_frame
         return -K_ENOENT;
     }
 
+    fpu_reset(current_task);
     current_task->address_space = new_pd;
     vmm_switch_address_space(new_pd);
     tss_set_kernel_stack(current_task->kernel_stack_top);
@@ -593,6 +626,8 @@ int task_fork_current(interrupt_frame_t *regs) {
     task_copy_path(child->image_path, sizeof(child->image_path), parent->image_path);
     if (fd_table_clone(child, parent) < 0) goto fail;
 
+    __asm__ volatile ("fxsave %0" : "=m"(parent->fpu_state));
+    kmemcpy(child->fpu_state, parent->fpu_state, sizeof(parent->fpu_state));
     child->saved_regs = *regs;
     child->saved_regs.eax = 0;
     child->state = TASK_READY;
@@ -868,6 +903,7 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
         }
     }
 
+    fpu_reset(exiting);
     fd_table_init(exiting);
     task_switch_to(exiting);
     regs->eip = exiting->entry;
@@ -889,7 +925,7 @@ void task_dump_current(interrupt_frame_t *regs) {
         return;
     }
 
-    user_stack_base = task->user_stack_top - PAGE_SIZE;
+    user_stack_base = USER_STACK_TOP - USER_STACK_BYTES;
     heap_start = user_heap_start_vaddr();
     heap_brk = user_heap_brk_vaddr();
     heap_limit = user_heap_limit_vaddr();
