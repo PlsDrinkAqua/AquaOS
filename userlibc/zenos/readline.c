@@ -18,6 +18,12 @@ char *zenos_readline(char *buf, size_t size) {
             return n == 0 && len > 0 ? buf : NULL;
         }
 
+        if (c == 3) {
+            puts("^C");
+            buf[0] = '\0';
+            return buf;
+        }
+
         if (c == '\n') {
             putchar('\n');
             buf[len] = '\0';

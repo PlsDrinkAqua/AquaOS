@@ -67,6 +67,13 @@ exception_common_stub:
     pushl %eax
     call exception_handler
     addl $4, %esp
+    cli
+    movl %esp, %eax
+    addl $4, %eax
+    pushl %eax
+    call task_return_to_user
+    cli
+    addl $4, %esp
 
     popl %eax
     movw %ax, %ds
@@ -99,6 +106,13 @@ irq_common_stub:
     pushl %eax      	# Push pointer as argument to the C handler
     
     call    interrupt_handler  # Call your C handler
+    addl $4, %esp
+    cli
+    movl %esp, %eax
+    addl $4, %eax
+    pushl %eax
+    call task_return_to_user
+    cli
     addl $4, %esp      # Clean up the argument (pointer)
 
     popl %eax

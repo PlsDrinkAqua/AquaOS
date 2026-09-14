@@ -35,6 +35,11 @@ typedef struct task {
     uint32_t heap_limit;
     page_directory_t *address_space;
     uint32_t parent_pid;
+    uint32_t job_id;
+    uint32_t child_job_id;
+    uint32_t terminal_parent;
+    uint8_t job_cancelled;
+    uint8_t interrupt_pending;
     uint32_t waiting_for_pid;
     uint32_t wake_tick;
     uint32_t keyboard_read_buf;
@@ -52,6 +57,10 @@ typedef struct task {
 int task_resolve_path(const char *path, char *out, size_t size);
 int task_directory_in_use(uint32_t ino);
 int task_chdir(const char *path);
+int task_terminal_control(unsigned action);
+int task_terminal_can_read(const task_t *task);
+int task_interrupt_foreground(void);
+void task_return_to_user(interrupt_frame_t *regs);
 void tasking_init(void);
 task_t *task_current(void);
 int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out);

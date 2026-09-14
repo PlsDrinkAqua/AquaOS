@@ -29,8 +29,11 @@ all: $(TARGETS)
 userlibc:
 	$(MAKE) -C ../userlibc
 
-$(TARGETS) fscheck memcheck libccheck stdiocheck: %: %.o userlibc user.ld
+$(TARGETS) fscheck memcheck libccheck stdiocheck intcheck: %: %.o userlibc user.ld
 	$(CC) -T user.ld -o $@ $(CFLAGS) $(LDFLAGS) ../userlibc/crt0.o $< $(LIBS)
+
+intcheck.o: ../tests/interrupt.c
+	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
 stdiocheck.o: ../tests/stdio_core.c
 	$(CC) -MD -c $< -o $@ -std=gnu11 $(CFLAGS) $(CPPFLAGS)
@@ -51,8 +54,8 @@ fscheck.o: ../tests/fs_delete.c
 	$(CC) -MD -c $< -o $@ $(CFLAGS) $(CPPFLAGS)
 
 clean:
-	rm -f $(TARGETS) fscheck fscheck.o memcheck memcheck.o libccheck libccheck.o stdiocheck stdiocheck.o
+	rm -f intcheck intcheck.o $(TARGETS) fscheck fscheck.o memcheck memcheck.o libccheck libccheck.o stdiocheck stdiocheck.o
 	rm -f $(TARGETS:=.o) *.d
 	$(MAKE) -C ../userlibc clean
 
--include $(TARGETS:=.d) fscheck.d memcheck.d libccheck.d stdiocheck.d
+-include $(TARGETS:=.d) fscheck.d memcheck.d libccheck.d stdiocheck.d intcheck.d

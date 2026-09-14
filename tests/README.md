@@ -336,3 +336,31 @@ image is required because the runtime archives exceed 1 KiB-block file limits.
 disk at `disk/zenos-dev.img` with `/tcc`, headers, libraries and `/hello.c`; boot
 it together with `myos.iso`. It never overwrites an existing disk. See
 `ports/tinycc/README.md` for the boot command, implementation details and limits.
+
+Ctrl+C foreground interruption:
+
+The shell claims the terminal, begins a command group before creating pipeline
+children, waits for its children, then finishes the group. Fork and spawn inherit
+the group and exec preserves it. Ctrl+C requests termination of all live group
+members, including sleeping tasks and blocked keyboard/pipe readers or writers.
+The IRQ only marks tasks; cleanup runs at the outer return to user mode, after
+kernel work finishes. Interrupted tasks use the normal exit/descriptor cleanup
+path and return status 130 through wait. Detached exited descendants are reaped
+on subsequent syscalls, including while init waits for a nested shell.
+
+At a shell prompt Ctrl+C discards queued input and the current input line, prints
+`^C`, and shows another prompt. Ctrl+D keeps its existing EOF behavior. Nested
+shells claim the terminal and restore their parent's ownership on exit. Terminal
+reads outside the foreground group return EIO. This is a single-terminal ZenOS
+API (`zenos_terminal_claim/begin_job/end_job`), without POSIX signal handlers,
+kill, background jobs, or stop/resume support. A command executing kernel code
+must finish that operation before termination can be delivered.
+
+The QEMU smoke runner installs a test-only `/intcheck`. It repeatedly interrupts
+busy loops, sleepers, blocked pipe writers, and forked children holding allocated
+memory and unlinked open files. It also checks two/four-stage pipelines, keyboard
+reads, prompt cancellation, nested-shell recovery, and repeated orphan cleanup.
+The remaining memory/filesystem regressions and offline e2fsck checks run afterward.
+Rebuild the kernel ISO and shell before testing; existing development disks need
+the rebuilt `/shell` installed while QEMU is stopped, or use a fresh disk created
+with `python3 ports/tinycc/make_disk.py disk/zenos-ctrlc.img`.

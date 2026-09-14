@@ -26,6 +26,8 @@
 static task_t task_table[TASK_MAX];
 static task_t *current_task;
 static uint32_t next_pid = 1;
+static uint32_t terminal_owner;
+static uint32_t next_job_id = 1;
 static uint32_t preempt_disable_depth;
 
 extern page_directory_t boot_page_directory;
@@ -210,6 +212,70 @@ static task_t *task_find_by_pid(uint32_t pid) {
     return NULL;
 }
 
+/* Terminal actions: claim a shell prompt, begin a job, finish a job.
+ * The shell starts a job before fork so every pipeline stage inherits it. */
+int task_terminal_control(unsigned action) {
+    task_t *owner = task_find_by_pid(terminal_owner);
+    if (!current_task) return -K_EPERM;
+    if (action == 0) {
+        if (owner == current_task) return 0;
+        if (owner && (!owner->child_job_id ||
+                      current_task->job_id != owner->child_job_id)) return -K_EPERM;
+        current_task->terminal_parent = terminal_owner;
+        terminal_owner = current_task->pid;
+        return 0;
+    }
+    if (owner != current_task) return -K_EPERM;
+    if (action == 1) {
+        if (owner->child_job_id) return -K_EBUSY;
+        owner->child_job_id = next_job_id++;
+        if (!next_job_id) next_job_id = 1;
+        owner->job_cancelled = 0;
+        return 0;
+    }
+    if (action == 2) {
+        owner->child_job_id = 0;
+        owner->job_cancelled = 0;
+        return 0;
+    }
+    return -K_EINVAL;
+}
+
+int task_terminal_can_read(const task_t *task) {
+    task_t *owner = task_find_by_pid(terminal_owner);
+    if (!owner) return 1;
+    return task && (owner->child_job_id ? task->job_id == owner->child_job_id :
+                                        task == owner);
+}
+
+/* IRQ context: mark only; never close files or abandon a kernel operation. */
+int task_interrupt_foreground(void) {
+    task_t *owner = task_find_by_pid(terminal_owner);
+    if (!owner || !owner->child_job_id) return 0;
+    owner->job_cancelled = 1;
+    for (unsigned i = 0; i < TASK_MAX; i++) {
+        task_t *task = &task_table[i];
+        if (task->state == TASK_UNUSED || task->state == TASK_EXITED ||
+            task->job_id != owner->child_job_id) continue;
+        task->interrupt_pending = 1;
+        if (task->state == TASK_BLOCKED || task->state == TASK_SLEEPING) {
+            task_clear_wait_state(task);
+            task->state = TASK_READY;
+        }
+    }
+    return 1;
+}
+
+/* Called with interrupts disabled after the complete outer handler returns.
+ * Scheduling may choose another interrupted member of the same pipeline. */
+void task_return_to_user(interrupt_frame_t *regs) {
+    if ((regs->cs & 3U) != 3U || preempt_disable_depth) return;
+    while (current_task && current_task->interrupt_pending) {
+        current_task->interrupt_pending = 0;
+        task_exit_current(130, regs);
+    }
+}
+
 static uint32_t task_index(task_t *task) {
     return (uint32_t)(task - task_table);
 }
@@ -305,6 +371,13 @@ static int task_schedule(interrupt_frame_t *regs) {
 
     if (prev && prev->state == TASK_RUNNING) {
         prev->saved_regs = *regs;
+        prev->state = TASK_READY;
+    }
+
+    /* An IRQ may request termination just before a syscall marks itself blocked. */
+    if (prev && prev->interrupt_pending &&
+        (prev->state == TASK_BLOCKED || prev->state == TASK_SLEEPING)) {
+        task_clear_wait_state(prev);
         prev->state = TASK_READY;
     }
 
@@ -561,6 +634,15 @@ int task_exec_current(const char *path, const char *const *argv, interrupt_frame
     return 0;
 }
 
+/* Publish the child and cancellation state atomically with respect to Ctrl+C. */
+static void task_publish_child(task_t *child, task_t *parent) {
+    uint32_t flags;
+    __asm__ volatile ("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    child->interrupt_pending = parent->job_cancelled || parent->interrupt_pending;
+    child->state = TASK_READY;
+    __asm__ volatile ("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
+
 int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     task_t *parent = current_task;
     task_t *child;
@@ -572,6 +654,7 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
 
     task_copy_path(image_path, sizeof(image_path), path);
 
+    if (parent->job_cancelled || parent->interrupt_pending) return -K_EAGAIN;
     child = task_alloc();
     if (!child) {
         return -1;
@@ -582,6 +665,7 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
 
     kmemcpy(child->cwd, parent->cwd, sizeof(child->cwd));
     child->parent_pid = parent->pid;
+    child->job_id = parent->child_job_id ? parent->child_job_id : parent->job_id;
 
     if (task_create_and_load_image(child, image_path) < 0) {
         child->state = TASK_UNUSED;
@@ -592,7 +676,7 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     child->saved_regs.eip = child->entry;
     child->saved_regs.useresp = child->user_stack_top;
     child->saved_regs.eax = 0;
-    child->state = TASK_READY;
+    task_publish_child(child, parent);
     regs->eax = child->pid;
 
     kprintf("task: pid=%u spawned child pid=%u image=%s entry=0x%x\n",
@@ -609,6 +693,7 @@ int task_fork_current(interrupt_frame_t *regs) {
     task_t *child;
 
     if (!parent || !regs || !parent->address_space) return -K_EINVAL;
+    if (parent->job_cancelled || parent->interrupt_pending) return -K_EAGAIN;
     child = task_alloc();
     if (!child) return -K_EAGAIN;
     if (task_alloc_kernel_stack(child) < 0) goto fail;
@@ -617,6 +702,7 @@ int task_fork_current(interrupt_frame_t *regs) {
     if (!child->address_space) goto fail;
     kmemcpy(child->cwd, parent->cwd, sizeof(child->cwd));
     child->parent_pid = parent->pid;
+    child->job_id = parent->child_job_id ? parent->child_job_id : parent->job_id;
     child->entry = parent->entry;
     child->user_stack_top = parent->user_stack_top;
     child->heap_start = parent->heap_start;
@@ -630,7 +716,7 @@ int task_fork_current(interrupt_frame_t *regs) {
     kmemcpy(child->fpu_state, parent->fpu_state, sizeof(parent->fpu_state));
     child->saved_regs = *regs;
     child->saved_regs.eax = 0;
-    child->state = TASK_READY;
+    task_publish_child(child, parent);
     regs->eax = child->pid;
     return (int)child->pid;
 
@@ -650,7 +736,7 @@ void task_yield_current(interrupt_frame_t *regs) {
 }
 
 void task_preempt_current(interrupt_frame_t *regs) {
-    if (preempt_disable_depth != 0 ||
+    if (!regs || (regs->cs & 3U) != 3U || preempt_disable_depth != 0 ||
         !current_task || current_task->state != TASK_RUNNING) {
         return;
     }
@@ -677,7 +763,8 @@ int task_complete_keyboard_read(char c) {
     for (uint32_t i = 0; i < TASK_MAX; i++) {
         task_t *task = &task_table[i];
 
-        if (task->state == TASK_BLOCKED && task->waiting_for_keyboard) {
+        if (task->state == TASK_BLOCKED && task->waiting_for_keyboard &&
+            task_terminal_can_read(task)) {
             page_directory_t *old_pd = vmm_current_address_space();
 
             vmm_switch_address_space(task->address_space);
@@ -800,12 +887,13 @@ void task_reap_exited_children(void) {
         return;
     }
 
+    /* Detached orphans must also be reclaimed while init waits for a nested shell. */
     for (uint32_t i = 0; i < TASK_MAX; i++) {
         task_t *child = &task_table[i];
 
         if (child == parent ||
             child->state != TASK_EXITED ||
-            child->parent_pid != parent->pid ||
+            (child->parent_pid != parent->pid && !child->detached) ||
             !child->wait_status_delivered) {
             continue;
         }
@@ -830,6 +918,12 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
     }
 
     exiting = current_task;
+    if (terminal_owner == exiting->pid) {
+        terminal_owner = exiting->terminal_parent;
+        exiting->terminal_parent = 0;
+    }
+    exiting->child_job_id = 0;
+    exiting->job_cancelled = 0;
     fd_table_close_all(exiting);
     exiting->state = TASK_EXITED;
     exiting->exit_status = status;

@@ -19,6 +19,12 @@ isr128:
     pushl %esp            # pass interrupt_frame_t* to C
     call syscall_handler
     addl $4, %esp
+    cli
+    movl %esp, %eax
+    pushl %eax
+    call task_return_to_user
+    cli
+    addl $4, %esp
 
     popa
     addl $8, %esp         # 弹掉 int_num + dummy_error

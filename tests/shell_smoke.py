@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def run(block_size, tinycc=False):
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
-    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck"], check=True,
+    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
                    stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
@@ -36,7 +36,7 @@ def run(block_size, tinycc=False):
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"]
         commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
         if tinycc:
             tree = ROOT / "ports/tinycc/root"
@@ -123,6 +123,37 @@ def run(block_size, tinycc=False):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            def interrupt_command(text, exits=1):
+                command(text, "exec /cat" if text.startswith("cat") else "interrupt target ready")
+                qmp("human-monitor-command", {"command-line": "sendkey ctrl-c 10"})
+                wait_for("with status 130")
+                time.sleep(.3)
+                output = screen()
+                if output.count("with status 130") != exits:
+                    raise AssertionError(output)
+                command("echo recovered", "\nrecovered\n")
+
+            # More than TASK_MAX repetitions expose leaked slots and live resources.
+            for i in range(20):
+                interrupt_command("intcheck " + ("spin", "sleep", "pipe", "tree")[i % 4],
+                                  3 if i % 4 == 3 else 1)
+            interrupt_command("cat")
+            interrupt_command("cat | cat", 2)
+            interrupt_command("intcheck | cat | cat | cat", 4)
+            # Ctrl+C cancels a partially typed prompt without executing it.
+            command("clear")
+            for char in "mkdir unwanted":
+                qmp("human-monitor-command", {"command-line": f"sendkey {keys.get(char, char)} 10"})
+                time.sleep(.025)
+            qmp("human-monitor-command", {"command-line": "sendkey ctrl-c 10"})
+            wait_for("^C")
+            command("echo prompt survived", "\nprompt survived\n")
+            command("shell", "shell at")
+            interrupt_command("intcheck sleep")
+            for _ in range(8):
+                interrupt_command("intcheck tree", 3)
+            command("exit", "exited from /shell with status 0")
+            interrupt_command("intcheck")
             if tinycc:
                 command("kirkc hello.c -o native-hello", "exited from /kirkc with status 0", seconds=60)
                 command("./native-hello", "Hello from native TinyCC!")
@@ -239,7 +270,7 @@ def run(block_size, tinycc=False):
                                     text=True, capture_output=True, check=True)
             if edited.stdout != "changed\nsaved\n":
                 raise AssertionError("Editor save did not persist: " + edited.stdout)
-            for removed in ["/edited.mk-tmp", "/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
+            for removed in ["/interrupt-live", "/unwanted", "/edited.mk-tmp", "/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
                 result = subprocess.run(["debugfs", "-R", f"stat {removed}", str(disk)],
                                         text=True, capture_output=True, check=True)
                 if "File not found" not in result.stderr:

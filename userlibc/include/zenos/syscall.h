@@ -30,6 +30,7 @@ enum {
     SYS_RMDIR   = 25,
     SYS_RENAME  = 26,
     SYS_FCNTL   = 27,
+    SYS_TERMINAL_CONTROL = 28,
 };
 
 #ifdef __cplusplus

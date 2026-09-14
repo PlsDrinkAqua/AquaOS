@@ -41,6 +41,7 @@ enum {
     SYS_RMDIR   = 25,
     SYS_RENAME  = 26,
     SYS_FCNTL   = 27,
+    SYS_TERMINAL_CONTROL = 28,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -94,7 +95,8 @@ void syscall_handler(interrupt_frame_t *regs)
         }
 
         case SYS_GETKEY:
-            regs->eax = (uint32_t)keyboard_getchar();
+            regs->eax = task_terminal_can_read(task_current()) ?
+                (uint32_t)keyboard_getchar() : (uint32_t)-K_EIO;
             break;
 
         case SYS_READ: {
@@ -141,6 +143,11 @@ void syscall_handler(interrupt_frame_t *regs)
                 break;
             }
 
+            if (!task_terminal_can_read(task_current())) {
+                regs->eax = (uint32_t)-K_EIO;
+                break;
+            }
+
             while (read < count) {
                 int c = keyboard_getchar();
                 if (c < 0) {
@@ -165,6 +172,10 @@ void syscall_handler(interrupt_frame_t *regs)
             regs->eax = read;
             break;
         }
+
+        case SYS_TERMINAL_CONTROL:
+            regs->eax = (uint32_t)task_terminal_control(regs->ebx);
+            break;
 
         case SYS_CLEAR:
             terminal_clear();

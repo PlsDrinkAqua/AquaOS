@@ -97,6 +97,12 @@ void keyboard_isr() {
 
     if (ctrl_down && scancode == 0x20) ascii = 4; /* Ctrl+D: terminal EOF. */
 
+    if (ctrl_down && scancode == 0x2E) {
+        key_read_index = key_write_index;
+        if (task_interrupt_foreground()) return;
+        ascii = 3; /* Prompt input cancellation. */
+    }
+
     if (ascii) {
         if (!task_complete_keyboard_read(ascii)) {
             keyboard_buffer_push(ascii);

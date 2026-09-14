@@ -124,8 +124,14 @@ static void run_pipeline(const char *line) {
         puts("shell: invalid pipeline or redirection");
         return;
     }
+    if (zenos_terminal_begin_job() < 0) { puts("shell: terminal busy"); return; }
     for (int i = 0; i + 1 < count; i++) {
-        if (pipe(pipes[i]) < 0) { puts("shell: pipe failed"); return; }
+        if (pipe(pipes[i]) < 0) {
+            puts("shell: pipe failed");
+            for (int j = 0; j < i; j++) { close(pipes[j][0]); close(pipes[j][1]); }
+            zenos_terminal_end_job();
+            return;
+        }
     }
     for (int i = 0; i < count; i++) {
         int pid = fork();
@@ -152,6 +158,7 @@ static void run_pipeline(const char *line) {
     }
     for (int i = 0; i + 1 < count; i++) { close(pipes[i][0]); close(pipes[i][1]); }
     for (int i = 0; i < count; i++) if (pids[i] >= 0) wait(pids[i]);
+    zenos_terminal_end_job();
 }
 
 static void run_command(const char *line) {
@@ -202,21 +209,13 @@ static void run_command(const char *line) {
         return;
     }
 
-    if (strcmp(line, "hello") == 0) {
-        int pid = spawn("/hello");
-        if (pid < 0) {
-            printf("spawn failed: /hello\n");
-        } else if (wait(pid) < 0) {
-            printf("wait failed: %d\n", pid);
-        }
-        return;
-    }
-
     run_pipeline(line);
 }
 
 int main(void) {
     char line[LINE_MAX];
+
+    if (zenos_terminal_claim() < 0) { puts("shell: terminal busy"); return 1; }
 
     printf("AquaOS shell at %x\n", 0x08048000);
 
