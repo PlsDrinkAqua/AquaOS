@@ -22,11 +22,12 @@ echo "hello, ZenOS" | sudo tee "$MNT/hello.txt" > /dev/null
 sudo mkdir -p "$MNT/subdir"
 echo "foo" | sudo tee "$MNT/subdir/bar.dat" > /dev/null
 
-sudo cp "$SHELL_PROGRAM" "$MNT/shell"
-sudo cp "$HELLO" "$MNT/hello"
+sudo mkdir -p "$MNT/bin" "$MNT/usr/bin" "$MNT/usr/include" "$MNT/usr/lib" "$MNT/home/user" "$MNT/tmp" "$MNT/etc"
+sudo cp "$SHELL_PROGRAM" "$MNT/bin/shell"
+sudo cp "$HELLO" "$MNT/bin/hello"
 
 for program in cat ls echo mkdir rm rmdir meinkampf; do
-    sudo cp "./user/$program" "$MNT/$program"
+    sudo cp "./user/$program" "$MNT/bin/$program"
 done
 
 # 确保写入磁盘

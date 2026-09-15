@@ -76,9 +76,10 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
         kprintf("Loading Init Task.................");
         uint32_t user_entry = 0;
         uint32_t user_stack = 0;
-        int ret = task_start_init("/shell", &user_entry, &user_stack);
+        int ret = task_start_init("/bin/shell", &user_entry, &user_stack);
+        if (ret < 0) ret = task_start_init("/shell", &user_entry, &user_stack);
         if (ret < 0) {
-            kprintf("failed to load /shell\n");
+            kprintf("failed to load /bin/shell\n");
             for (;;) {
                 __asm__ volatile ("hlt");
             }

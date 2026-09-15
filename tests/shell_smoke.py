@@ -11,7 +11,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
     subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
@@ -26,7 +26,7 @@ def run(block_size, tinycc=False, scrollback_only=False):
         hello.write_text("hello, ZenOS\n")
         bar = tmp / "bar.dat"
         bar.write_text("foo\n")
-        commands = ["mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
+        commands = ["mkdir /bin", "mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
         history = tmp / "history.txt"
         history.write_text("".join(f"history line {i:04d}\n" for i in range(1100)))
         commands.append(f"write {history} /history.txt")
@@ -40,10 +40,10 @@ def run(block_size, tinycc=False, scrollback_only=False):
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
         programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"]
-        commands += [f"write {ROOT / 'user' / name} /{name}" for name in programs]
+        commands += [f"write {ROOT / 'user' / name} /bin/{name}" for name in programs]
         if tinycc:
             tree = ROOT / "ports/tinycc/root"
-            if not (tree / "kirkc").is_file():
+            if not (tree / "usr/bin/kirkc").is_file():
                 raise RuntimeError("Run python3 ports/tinycc/build.py first")
             for entry in sorted(tree.rglob("*"), key=lambda p: (len(p.parts), str(p))):
                 target = "/" + entry.relative_to(tree).as_posix()
@@ -126,6 +126,27 @@ def run(block_size, tinycc=False, scrollback_only=False):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            if layout_only:
+                command("exit", "shell at")
+                listing = command("ls /", "\nbin/\n")
+                assert "\ncat\n" not in listing and "\nshell\n" not in listing
+                command("echo lookup works", "\nlookup works\n")
+                command("/bin/cat /hello.txt", "hello, ZenOS")
+                command("cd /subdir")
+                command("../bin/cat bar.dat", "\nfoo\n")
+                command("shell", "shell at")
+                command("exit", "exited from /bin/shell with status 0")
+                if tinycc:
+                    command("cd /home/user")
+                    command("kirkc hello.c -o native-hello", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                    command("./native-hello", "Hello from native TinyCC!")
+                    command("kirkc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                    command("./nativecheck", "native compiler checks passed")
+                qmp("quit")
+                proc.wait(timeout=5)
+                subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                print("PASS: filesystem layout, shell restart and command lookup", flush=True)
+                return
             if scrollback_only:
                 command("cat /history.txt", "history line 1099")
                 live = screen()
@@ -157,7 +178,7 @@ def run(block_size, tinycc=False, scrollback_only=False):
                 proc.wait(timeout=5)
                 return
             def interrupt_command(text, exits=1):
-                command(text, "exec /cat" if text.startswith("cat") else "interrupt target ready")
+                command(text, "exec /bin/cat" if text.startswith("cat") else "interrupt target ready")
                 qmp("human-monitor-command", {"command-line": "sendkey ctrl-c 10"})
                 wait_for("with status 130")
                 time.sleep(.3)
@@ -185,22 +206,24 @@ def run(block_size, tinycc=False, scrollback_only=False):
             interrupt_command("intcheck sleep")
             for _ in range(8):
                 interrupt_command("intcheck tree", 3)
-            command("exit", "exited from /shell with status 0")
+            command("exit", "exited from /bin/shell with status 0")
             interrupt_command("intcheck")
             if tinycc:
-                command("kirkc hello.c -o native-hello", "exited from /kirkc with status 0", seconds=60)
+                command("cd /home/user")
+                command("kirkc hello.c -o native-hello", "exited from /usr/bin/kirkc with status 0", seconds=60)
                 command("./native-hello", "Hello from native TinyCC!")
-                command("kirkc nativecheck.c companion.c -o nativecheck", "exited from /kirkc with status 0", seconds=60)
+                command("kirkc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/kirkc with status 0", seconds=60)
                 command("./nativecheck", "native compiler checks passed")
-                command("kirkc -c companion.c -o companion.o", "exited from /kirkc with status 0", seconds=60)
-                command("kirkc nativecheck.c companion.o -o nativecheck", "exited from /kirkc with status 0", seconds=60)
+                command("kirkc -c companion.c -o companion.o", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("kirkc nativecheck.c companion.o -o nativecheck", "exited from /usr/bin/kirkc with status 0", seconds=60)
                 command("./nativecheck", "native compiler checks passed")
-                command("kirkc bad.c -o bad", "exited from /kirkc with status 1", seconds=60)
-                command("kirkc missing.c -o missing", "exited from /kirkc with status 1", seconds=60)
-                command("kirkc hello.c -o /no-dir/hello", "exited from /kirkc with status 1", seconds=60)
-                command("kirkc hello.c -o native-hello", "exited from /kirkc with status 0", seconds=60)
+                command("kirkc bad.c -o bad", "exited from /usr/bin/kirkc with status 1", seconds=60)
+                command("kirkc missing.c -o missing", "exited from /usr/bin/kirkc with status 1", seconds=60)
+                command("kirkc hello.c -o /no-dir/hello", "exited from /usr/bin/kirkc with status 1", seconds=60)
+                command("kirkc hello.c -o native-hello", "exited from /usr/bin/kirkc with status 0", seconds=60)
                 command("./native-hello", "Hello from native TinyCC!")
             # Send editor input without the shell command helper's clear command.
+            command("cd /")
             command("meinkampf /edited", "meinkampf: /edited")
 
             def editor_input(text, expected):
@@ -217,46 +240,46 @@ def run(block_size, tinycc=False, scrollback_only=False):
             editor_input("r 1 changed", "r 1 changed")
             editor_input("d 3", "d 3")
             editor_input("s", "saved 15 bytes")
-            editor_input("q", "exited from /meinkampf with status 0")
+            editor_input("q", "exited from /bin/meinkampf with status 0")
             command("cat /edited", "\nchanged\nmiddle\n")
             command("meinkampf /edited", "meinkampf: /edited")
             editor_input("r 2 saved", "meinkampf*>")
             editor_input("s", "saved 14 bytes")
             editor_input("a discard", "a discard")
             editor_input("q", "Discard unsaved changes?")
-            editor_input("y", "exited from /meinkampf with status 0")
+            editor_input("y", "exited from /bin/meinkampf with status 0")
             command("cat /edited", "\nchanged\nsaved\n")
             command("stdiocheck", "stdio checks passed")
             command("libccheck", "libc core checks passed")
             command("memcheck", "memory reliability checks passed", seconds=90)
             command("fscheck", "filesystem deletion checks passed", seconds=90)
-            command("mkdir /remove-me", "exited from /mkdir with status 0")
+            command("mkdir /remove-me", "exited from /bin/mkdir with status 0")
             command("echo temporary > /remove-me/note")
             command("rmdir /remove-me", "errno=39")
             command("cd /remove-me")
-            command("rm note", "exited from /rm with status 0")
+            command("rm note", "exited from /bin/rm with status 0")
             command("cd /")
-            command("rmdir /remove-me", "exited from /rmdir with status 0")
+            command("rmdir /remove-me", "exited from /bin/rmdir with status 0")
             command("rm /remove-me/note", "errno=2")
             # A nested shell must return to its parent (including the parent's cwd).
             command("shell", "shell at")
             command("cd /subdir")
-            command("exit", "exited from /shell with status 0")
+            command("exit", "exited from /bin/shell with status 0")
             command("pwd", "\n/\n")
             command("shell", "shell at")
             qmp("human-monitor-command", {"command-line": "sendkey ctrl-d 10"})
-            wait_for("exited from /shell with status 0")
+            wait_for("exited from /bin/shell with status 0")
             command("pwd", "\n/\n")
 
             # Bare cat reads the keyboard until Ctrl+D, then the shell resumes.
-            command("cat", "exec /cat")
+            command("cat", "exec /bin/cat")
             for char in "keyboard":
                 qmp("human-monitor-command", {"command-line": f"sendkey {char} 10"})
                 time.sleep(.025)
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("\nkeyboard\n")
             qmp("human-monitor-command", {"command-line": "sendkey ctrl-d 10"})
-            wait_for("exited from /cat with status 0")
+            wait_for("exited from /bin/cat with status 0")
             command("pwd", "\n/\n")
             command("mkdir /fromshell")
             command("cd /fromshell")
@@ -269,8 +292,8 @@ def run(block_size, tinycc=False, scrollback_only=False):
             command("echo saved > note")
             command("cat note", "\nsaved\n")
             command("cd /")
-            command("/cat /hello.txt", "hello, ZenOS")
-            command("/echo hello world | /cat > /copy.txt")
+            command("/bin/cat /hello.txt", "hello, ZenOS")
+            command("/bin/echo hello world | /bin/cat > /copy.txt")
             command("cat < /copy.txt", "\nhello world\n")
             command("echo again >> /copy.txt")
             command("cat /copy.txt", "\nhello world\nagain\n")
@@ -283,7 +306,7 @@ def run(block_size, tinycc=False, scrollback_only=False):
             command("cat bar.dat", "\nfoo\n")
             command("echo relative > local.txt")
             command("cat < local.txt", "\nrelative\n")
-            command("../cat bar.dat", "\nfoo\n")
+            command("../bin/cat bar.dat", "\nfoo\n")
             command("cd ..")
             command("pwd", "\n/\n")
             command("cd /hello.txt", "cd: cannot change directory")
@@ -320,5 +343,6 @@ if __name__ == "__main__":
     parser.add_argument("--block-size", type=int, choices=[1024, 4096], default=1024)
     parser.add_argument("--tinycc", action="store_true", help="exercise the staged native TinyCC port")
     parser.add_argument("--scrollback-only", action="store_true", help="exercise terminal scrollback keys")
+    parser.add_argument("--layout-only", action="store_true", help="exercise installed paths and shell restart")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only)
+    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only)

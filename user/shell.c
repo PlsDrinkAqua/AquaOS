@@ -105,7 +105,20 @@ static void execute_stage(char *command) {
     const char *name = argv[0];
     int has_slash = 0;
     for (const char *scan = name; *scan; scan++) if (*scan == '/') has_slash = 1;
-    if (!has_slash) path[i++] = '/';
+    if (!has_slash) {
+        const char *directories[] = {"/bin/", "/usr/bin/", "/"};
+        for (unsigned dir = 0; dir < sizeof(directories) / sizeof(directories[0]); dir++) {
+            if (strlen(directories[dir]) + strlen(name) >= sizeof(path)) {
+                puts("shell: program path too long");
+                exit(1);
+            }
+            strcpy(path, directories[dir]);
+            strcpy(path + strlen(path), name);
+            exec(path, argv);
+        }
+        printf("shell: command not found: %s\n", name);
+        exit(127);
+    }
     while (*name && i + 1 < sizeof(path)) path[i++] = *name++;
     if (*name) { puts("shell: program path too long"); exit(1); }
     path[i] = '\0';

@@ -13,7 +13,7 @@ args = parser.parse_args()
 output = args.output.resolve()
 if output.exists(): raise SystemExit(f'Refusing to overwrite {output}; choose a new output path')
 tree = ROOT/'ports/tinycc/root'
-if not (tree/'kirkc').is_file(): raise SystemExit('Run python3 ports/tinycc/build.py first')
+if not (tree/'usr/bin/kirkc').is_file(): raise SystemExit('Run python3 ports/tinycc/build.py first')
 subprocess.run(['make', '-C', str(ROOT/'user')], check=True)
 output.parent.mkdir(parents=True, exist_ok=True)
 def quote(path): return '"' + str(path).replace('\\', '\\\\').replace('"', '\\"') + '"'
@@ -22,9 +22,9 @@ with tempfile.TemporaryDirectory(prefix='zenos-dev-', dir=output.parent) as name
     image = work/'disk.img'
     with image.open('wb') as f: f.truncate(100*1024*1024)
     subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(image)], check=True)
-    commands = []
+    commands = ['mkdir /bin', 'mkdir /tmp', 'mkdir /etc']
     for program in ['shell','hello','cat','ls','echo','mkdir','rm','rmdir','meinkampf']:
-        commands.append(f'write {quote(ROOT/"user"/program)} /{program}')
+        commands.append(f'write {quote(ROOT/"user"/program)} /bin/{program}')
     for entry in sorted(tree.rglob('*'), key=lambda p: (len(p.parts), str(p))):
         target = '/' + entry.relative_to(tree).as_posix()
         if entry.is_file() and entry.stat().st_size > (12+4096//4)*4096:

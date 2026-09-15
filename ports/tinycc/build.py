@@ -52,10 +52,10 @@ replace('tccelf.c', '    fclose(f);\n\n    return 0;', '    {\n        int faile
 (source / 'config.h').write_text('''#define TCC_VERSION "0.9.27"
 #define CONFIG_TCC_STATIC 1
 #define TCC_TARGET_I386 1
-#define CONFIG_TCCDIR "/lib/tcc"
-#define CONFIG_TCC_SYSINCLUDEPATHS "/include"
-#define CONFIG_TCC_LIBPATHS "/lib"
-#define CONFIG_TCC_CRTPREFIX "/lib"
+#define CONFIG_TCCDIR "/usr/lib/tcc"
+#define CONFIG_TCC_SYSINCLUDEPATHS "/usr/include"
+#define CONFIG_TCC_LIBPATHS "/usr/lib"
+#define CONFIG_TCC_CRTPREFIX "/usr/lib"
 ''')
 cc = os.environ.get('ZENOS_CC', 'i686-elf-gcc')
 ar = os.environ.get('ZENOS_AR', 'i686-elf-ar')
@@ -64,19 +64,21 @@ run(['make', '-C', 'userlibc'])
 flags = ['-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-D__zenos__=1', '-I'+str(ROOT/'userlibc/include')]
 run([cc, *flags, '-c', source/'tcc.c', '-o', BUILD/'tcc.o'])
 if DEST.exists(): shutil.rmtree(DEST)
-(DEST/'lib/tcc').mkdir(parents=True)
-run([cc, '-T', ROOT/'user/user.ld', '-o', DEST/'kirkc', ROOT/'userlibc/crt0.o', BUILD/'tcc.o', ROOT/'userlibc/libc.a', '-nostdlib', '-lgcc', '-Wl,-s'])
+(DEST/'usr/lib/tcc').mkdir(parents=True)
+(DEST/'usr/bin').mkdir(parents=True)
+(DEST/'home/user').mkdir(parents=True)
+run([cc, '-T', ROOT/'user/user.ld', '-o', DEST/'usr/bin/kirkc', ROOT/'userlibc/crt0.o', BUILD/'tcc.o', ROOT/'userlibc/libc.a', '-nostdlib', '-lgcc', '-Wl,-s'])
 for name in ['libtcc1.c', 'alloca86.S', 'alloca86-bt.S']:
     run([cc, *flags, '-c', source/'lib'/name, '-o', BUILD/(Path(name).stem+'.o')])
-run([ar, 'rcs', DEST/'lib/tcc/libtcc1.a', *[BUILD/(n+'.o') for n in ['libtcc1','alloca86','alloca86-bt']]])
-shutil.copy2(ROOT/'userlibc/libc.a', DEST/'lib/libc.a')
-shutil.copy2(ROOT/'userlibc/crt0.o', DEST/'lib/crt0.o')
+run([ar, 'rcs', DEST/'usr/lib/tcc/libtcc1.a', *[BUILD/(n+'.o') for n in ['libtcc1','alloca86','alloca86-bt']]])
+shutil.copy2(ROOT/'userlibc/libc.a', DEST/'usr/lib/libc.a')
+shutil.copy2(ROOT/'userlibc/crt0.o', DEST/'usr/lib/crt0.o')
 libgcc = subprocess.check_output([cc, '-print-libgcc-file-name'], text=True).strip()
-shutil.copy2(libgcc, DEST/'lib/libgcc.a')
-shutil.copytree(ROOT/'userlibc/include', DEST/'include')
+shutil.copy2(libgcc, DEST/'usr/lib/libgcc.a')
+shutil.copytree(ROOT/'userlibc/include', DEST/'usr/include')
 for name in ['stdarg.h', 'stdbool.h', 'float.h']:
-    shutil.copy2(source/'include'/name, DEST/'include'/name)
-shutil.copy2(source/'COPYING', DEST/'lib/tcc/COPYING')
+    shutil.copy2(source/'include'/name, DEST/'usr/include'/name)
+shutil.copy2(source/'COPYING', DEST/'usr/lib/tcc/COPYING')
 for example in (HERE/'examples').glob('*.c'):
-    shutil.copy2(example, DEST/example.name)
+    shutil.copy2(example, DEST/'home/user'/example.name)
 print('TinyCC installation tree:', DEST)

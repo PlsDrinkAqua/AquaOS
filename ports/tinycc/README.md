@@ -1,7 +1,7 @@
 # TinyCC on ZenOS
 
 This port builds TinyCC 0.9.27 (`d348a9a51d32cece842b7885d27a411436d7887b`)
-with the existing i686-elf toolchain. The resulting `/tcc` runs on ZenOS and
+with the existing i686-elf toolchain. The resulting `/usr/bin/kirkc` runs on ZenOS and
 compiles/links static i386 ELF executables using ZenOS startup code and libc.
 It does not use Linux syscalls. The first build downloads the pinned archive;
 subsequent builds use its SHA-256-verified cache.
@@ -28,6 +28,9 @@ The disk creator needs `mkfs.ext2`, `debugfs`, and `e2fsck`, but no root or loop
 mount. It creates a separate 100 MiB development disk and refuses to overwrite
 an existing path. Supply an alternate output filename as its argument to make
 another disk. Existing disk images are not updated by the build or smoke test.
+To move an older development disk to the organized layout, close QEMU and run
+`python3 ports/tinycc/migrate_disk.py`. It preserves the original disk as a
+backup; see [Filesystem Layout](../../docs/FILESYSTEM_LAYOUT.md).
 The host build needs Python 3.12+, the cross compiler, and make; boot/testing
 also needs QEMU and the usual GRUB ISO build dependencies. `ZENOS_CC` and
 `ZENOS_AR` can override the cross compiler and archiver commands.
@@ -35,26 +38,27 @@ also needs QEMU and the usual GRUB ISO build dependencies. `ZENOS_CC` and
 Inside ZenOS:
 
 ```sh
-tcc hello.c -o hello
+cd /home/user
+kirkc hello.c -o hello
 ./hello
 meinkampf hello.c
-tcc hello.c -o hello
+kirkc hello.c -o hello
 ./hello
 ```
 
-`hello.c` is installed on the development disk. The expected greeting is
-`Hello from native TinyCC!`. Sources can include headers in `/include`; libraries
-are in `/lib` and `/lib/tcc`. `tcc -c` produces objects, and multiple source/object
+`hello.c` is installed in `/home/user` on the development disk. The expected greeting is
+`Hello from native TinyCC!`. Sources can include headers in `/usr/include`; libraries
+are in `/usr/lib` and `/usr/lib/tcc`. `kirkc -c` produces objects, and multiple source/object
 inputs can be linked. `-nostdlib` retains its normal opt-out meaning.
 
 ## Integration
 
 `build.py` applies explicit, checked substitutions to a fresh pinned source
 extraction. A mismatched patch fails the build. The patched sources remain in
-`build/` for inspection. Output in `root/` contains `/tcc`, ZenOS headers,
+`build/` for inspection. Output in `root/` contains `/usr/bin/kirkc`, ZenOS headers,
 TinyCC's stdarg/stdbool/float headers, `crt0.o`, `libc.a`, `libtcc1.a`, the matching
 cross-toolchain `libgcc.a`, and example/regression sources. TinyCC's license is
-installed at `/lib/tcc/COPYING`; upstream sources retain their own notices.
+installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
 
 The compiler links `crt0.o` automatically and defaults to static linking. Its
 support runtime handles compiler-generated operations; libgcc supplies helpers

@@ -990,8 +990,9 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
         vmm_destroy_address_space(old_pd);
     }
 
-    if (task_create_and_load_image(exiting, "/shell") < 0) {
-        kprintf("task: failed to restart /shell\n");
+    if (task_create_and_load_image(exiting, "/bin/shell") < 0 &&
+        task_create_and_load_image(exiting, "/shell") < 0) {
+        kprintf("task: failed to restart /bin/shell\n");
         for (;;) {
             __asm__ volatile ("hlt");
         }

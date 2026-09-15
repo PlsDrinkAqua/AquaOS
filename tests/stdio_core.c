@@ -87,7 +87,7 @@ static int context_checks(void) {
         CHECK(live_registers(12.5, 0x12345678));
         CHECK(check_controls(0x0b7f, 0x5f80));
         const char *args[] = {"stdiocheck", "exec-fpu", NULL};
-        CHECK(exec("/stdiocheck", args) == 0);
+        CHECK(exec("/bin/stdiocheck", args) == 0);
         return 1;
     }
     CHECK(live_registers(-37.25, 0xabcdef01));

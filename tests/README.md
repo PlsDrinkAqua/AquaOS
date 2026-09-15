@@ -5,6 +5,8 @@ make -C user
 sh iso.sh
 python3 tests/shell_smoke.py
 python3 tests/shell_smoke.py --block-size 4096
+python3 ports/tinycc/build.py
+python3 tests/shell_smoke.py --block-size 4096 --tinycc --layout-only
 ```
 
 The test creates and removes its own ext2 disk. It does not modify your existing
@@ -22,14 +24,15 @@ the executable path as argv[0]; an empty vector produces argc = 0.
 Invalid pointers return EFAULT; excessive arguments return E2BIG.
 All user programs must be rebuilt for the new exec syscall ABI.
 
-The shell runs standalone /cat, /ls, /echo, /mkdir, /rm, and /rmdir, with space/tab-separated
+The shell runs standalone commands in `/bin`, with space/tab-separated
 arguments. It supports up to four pipeline stages and <, >, and >> redirection.
 Quoting, escapes, and environment variables are not implemented.
 Bare cat copies standard input; press Ctrl+D to finish keyboard input.
 cat accepts multiple paths and '-' for stdin. Nested shells return to their
 parent with `exit` or Ctrl+D at an empty prompt.
-Commands without a slash are looked up in the root directory; paths containing
-a slash are used as written.
+Commands without a slash search `/bin`, `/usr/bin`, then the legacy root
+directory; paths containing a slash are used as written. See
+[Filesystem Layout](../docs/FILESYSTEM_LAYOUT.md) for compiler and header paths.
 
 Each process has a working directory, initially /. chdir changes it and
 getcwd copies its absolute path into a caller-provided buffer. fork and spawn
@@ -38,7 +41,7 @@ Relative file paths and executable paths resolve against that directory.
 Paths are limited to 255 bytes after prefixing the working directory.
 
 Directory creation is available through `int mkdir(const char *path)` in
-`<unistd.h>` and the standalone `/mkdir` command:
+`<unistd.h>` and the standalone `/bin/mkdir` command:
 
 ```sh
 mkdir /projects
@@ -63,8 +66,8 @@ on the disposable disk. It also reads back a file inside a newly created
 directory with debugfs to verify persistence. `e2fsck` is therefore required
 as well.
 
-File deletion is available through `unlink(path)` and `/rm`; empty directories
-can be removed through `rmdir(path)` and `/rmdir`. Both commands accept multiple
+File deletion is available through `unlink(path)` and `/bin/rm`; empty directories
+can be removed through `rmdir(path)` and `/bin/rmdir`. Both commands accept multiple
 paths and return a nonzero status if any removal fails. Options and recursive
 deletion are not implemented. For example:
 
