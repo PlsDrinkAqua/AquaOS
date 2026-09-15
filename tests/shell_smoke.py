@@ -11,7 +11,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False):
+def run(block_size, tinycc=False, scrollback_only=False):
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
     subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
@@ -27,6 +27,9 @@ def run(block_size, tinycc=False):
         bar = tmp / "bar.dat"
         bar.write_text("foo\n")
         commands = ["mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
+        history = tmp / "history.txt"
+        history.write_text("".join(f"history line {i:04d}\n" for i in range(1100)))
+        commands.append(f"write {history} /history.txt")
         linked = tmp / "linked"
         linked.write_text("linked")
         oversized = tmp / "oversized"
@@ -123,6 +126,36 @@ def run(block_size, tinycc=False):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            if scrollback_only:
+                command("cat /history.txt", "history line 1099")
+                live = screen()
+
+                def scroll(key):
+                    qmp("human-monitor-command", {"command-line": f"sendkey {key} 10"})
+                    time.sleep(.15)
+                    return screen()
+
+                older = scroll("pgup")
+                assert older != live and "history line" in older
+                assert scroll("pgdn") == live
+                older = scroll("shift-up")
+                assert older.splitlines()[1:] == live.splitlines()[:-1]
+                assert scroll("shift-down") == live
+                scroll("shift-pgup")
+                assert scroll("shift-pgdn") == live
+                for _ in range(44):
+                    oldest = scroll("pgup")
+                assert scroll("pgup") == oldest
+                typed = scroll("e")
+                assert "history line 1099" in typed and typed != oldest
+                scroll("backspace")
+                command("clear")
+                cleared = screen()
+                assert scroll("pgup") == cleared
+                print("PASS: scrollback keys, bounds, typing and clear", flush=True)
+                qmp("quit")
+                proc.wait(timeout=5)
+                return
             def interrupt_command(text, exits=1):
                 command(text, "exec /cat" if text.startswith("cat") else "interrupt target ready")
                 qmp("human-monitor-command", {"command-line": "sendkey ctrl-c 10"})
@@ -286,5 +319,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--block-size", type=int, choices=[1024, 4096], default=1024)
     parser.add_argument("--tinycc", action="store_true", help="exercise the staged native TinyCC port")
+    parser.add_argument("--scrollback-only", action="store_true", help="exercise terminal scrollback keys")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc)
+    run(args.block_size, args.tinycc, args.scrollback_only)

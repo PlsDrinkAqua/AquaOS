@@ -1,6 +1,7 @@
 #include <kernel/io.h>
 #include <kernel/keyboard.h>
 #include <kernel/task.h>
+#include <kernel/tty.h>
 #include <stdbool.h>
 
 #define KEYBOARD_DATA_PORT 0x60
@@ -35,6 +36,7 @@ static const char scancode_to_ascii_shift[128] = {
 // Track Shift state
 static bool shift_down = false;
 static bool ctrl_down = false;
+static bool extended_key;
 
 static char key_buffer[KEYBOARD_BUFFER_SIZE];
 static unsigned int key_read_index;
@@ -69,6 +71,23 @@ int keyboard_getchar(void) {
 void keyboard_isr() {
     unsigned char scancode = inb(KEYBOARD_DATA_PORT);
 
+    if (scancode == 0xE0) {
+        extended_key = true;
+        return;
+    }
+    bool extended = extended_key;
+    extended_key = false;
+
+    if (extended) {
+        if (scancode == 0x49) terminal_scroll_view(24);
+        else if (scancode == 0x51) terminal_scroll_view(-24);
+        else if (shift_down && scancode == 0x48) terminal_scroll_view(1);
+        else if (shift_down && scancode == 0x50) terminal_scroll_view(-1);
+        else if (scancode == 0x1D || scancode == 0x9D)
+            ctrl_down = scancode == 0x1D;
+        if (scancode != 0x1C && scancode != 0x35) return;
+    }
+
     if (scancode == 0x1D || scancode == 0x9D) {
         ctrl_down = scancode == 0x1D;
         return;
@@ -98,12 +117,14 @@ void keyboard_isr() {
     if (ctrl_down && scancode == 0x20) ascii = 4; /* Ctrl+D: terminal EOF. */
 
     if (ctrl_down && scancode == 0x2E) {
+        terminal_follow_output();
         key_read_index = key_write_index;
         if (task_interrupt_foreground()) return;
         ascii = 3; /* Prompt input cancellation. */
     }
 
     if (ascii) {
+        terminal_follow_output();
         if (!task_complete_keyboard_read(ascii)) {
             keyboard_buffer_push(ascii);
         }
