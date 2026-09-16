@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <zenos/readline.h>
+#include <zenos/keys.h>
 
 char *zenos_readline(char *buf, size_t size) {
     size_t len = 0;
@@ -17,6 +18,9 @@ char *zenos_readline(char *buf, size_t size) {
             buf[len] = '\0';
             return n == 0 && len > 0 ? buf : NULL;
         }
+
+        if ((unsigned char)c >= ZENOS_KEY_UP && (unsigned char)c <= ZENOS_KEY_RIGHT)
+            continue;
 
         if (c == 3) {
             puts("^C");

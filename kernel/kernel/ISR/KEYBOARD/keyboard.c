@@ -53,6 +53,11 @@ static void keyboard_buffer_push(char c) {
     key_write_index = next;
 }
 
+static void keyboard_deliver(char c) {
+    terminal_follow_output();
+    if (!task_complete_keyboard_read(c)) keyboard_buffer_push(c);
+}
+
 int keyboard_getchar(void) {
     __asm__ volatile ("cli" ::: "memory");
 
@@ -83,6 +88,10 @@ void keyboard_isr() {
         else if (scancode == 0x51) terminal_scroll_view(-24);
         else if (shift_down && scancode == 0x48) terminal_scroll_view(1);
         else if (shift_down && scancode == 0x50) terminal_scroll_view(-1);
+        else if (scancode == 0x48) keyboard_deliver(KEY_UP);
+        else if (scancode == 0x50) keyboard_deliver(KEY_DOWN);
+        else if (scancode == 0x4B) keyboard_deliver(KEY_LEFT);
+        else if (scancode == 0x4D) keyboard_deliver(KEY_RIGHT);
         else if (scancode == 0x1D || scancode == 0x9D)
             ctrl_down = scancode == 0x1D;
         if (scancode != 0x1C && scancode != 0x35) return;
@@ -123,10 +132,5 @@ void keyboard_isr() {
         ascii = 3; /* Prompt input cancellation. */
     }
 
-    if (ascii) {
-        terminal_follow_output();
-        if (!task_complete_keyboard_read(ascii)) {
-            keyboard_buffer_push(ascii);
-        }
-    }
+    if (ascii) keyboard_deliver(ascii);
 }

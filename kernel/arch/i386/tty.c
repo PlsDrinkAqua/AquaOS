@@ -20,6 +20,47 @@ static uint16_t lines[TERMINAL_LINES][80];
 static size_t live_top;
 static size_t history_count;
 static size_t view_offset;
+static unsigned escape_state, escape_arg[2], escape_index;
+void terminal_putentryat(unsigned char c, uint8_t color, size_t x, size_t y);
+
+/* Bounded CSI subset used by full-screen user programs. */
+static int terminal_escape(unsigned char c) {
+    if (!escape_state) {
+        if (c != 27) return 0;
+        escape_state = 1;
+        return 1;
+    }
+    if (escape_state == 1) {
+        escape_state = c == '[' ? 2 : 0;
+        escape_arg[0] = escape_arg[1] = escape_index = 0;
+        return 1;
+    }
+    if (c >= '0' && c <= '9') {
+        if (escape_arg[escape_index] < 1000)
+            escape_arg[escape_index] = escape_arg[escape_index] * 10 + c - '0';
+        return 1;
+    }
+    if (c == ';' && !escape_index) { escape_index = 1; return 1; }
+    escape_state = 0;
+    if (c == 'H' || c == 'f') {
+        unsigned row = escape_arg[0] ? escape_arg[0] - 1 : 0;
+        unsigned col = escape_arg[1] ? escape_arg[1] - 1 : 0;
+        terminal_row = row < VGA_HEIGHT ? row : VGA_HEIGHT - 1;
+        terminal_column = col < VGA_WIDTH ? col : VGA_WIDTH - 1;
+    } else if (c == 'J' && escape_arg[0] == 2) {
+        for (size_t y = 0; y < VGA_HEIGHT; y++)
+            for (size_t x = 0; x < VGA_WIDTH; x++)
+                terminal_putentryat(' ', terminal_color, x, y);
+    } else if (c == 'K' && escape_arg[0] == 0) {
+        for (size_t x = terminal_column; x < VGA_WIDTH; x++)
+            terminal_putentryat(' ', terminal_color, x, terminal_row);
+    } else if (c == 'm') {
+        terminal_color = escape_arg[0] == 7
+            ? vga_entry_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_GREY)
+            : vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    }
+    return 1;
+}
 
 static void terminal_redraw(void) {
     for (size_t y = 0; y < VGA_HEIGHT; y++) {
@@ -57,6 +98,8 @@ void terminal_initialize(void) {
 }
 
 void terminal_clear(void) {
+    escape_state = 0;
+    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     live_top = 0;
     history_count = 0;
     view_offset = 0;
@@ -97,6 +140,7 @@ static void terminal_scroll(void) {
 }
 
 void terminal_putchar(char c) {
+    if (terminal_escape((unsigned char)c)) return;
     if (c == '\n') {
         // Move to the next line and reset column.
         terminal_column = 0;

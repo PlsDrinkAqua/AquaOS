@@ -145,8 +145,13 @@ live malloc allocations. Freed kernel heap memory is retained for reuse;
 returning unused heap pages to the physical allocator and kernel stack guards
 remain future work.
 
-The line editor is named `meinkampf` and starts with `meinkampf <file>`.
-A missing file opens an empty buffer. Commands are:
+`meinkampf <file>` now opens the full-screen Vim-style editor. See
+[Editor](../docs/EDITOR.md) for modes, motions, search, undo, and save commands.
+The host checks also cover terminal cursor bounds, erase controls and reverse
+video; the QEMU checks exercise visual editing through keyboard input and VGA.
+
+The original line editor starts with `meinkampf --line <file>`.
+A missing file opens an empty buffer. Its commands are:
 
 | Command | Action |
 | --- | --- |

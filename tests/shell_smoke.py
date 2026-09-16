@@ -224,7 +224,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
                 command("./native-hello", "Hello from native TinyCC!")
             # Send editor input without the shell command helper's clear command.
             command("cd /")
-            command("meinkampf /edited", "meinkampf: /edited")
+            command("meinkampf --line /edited", "meinkampf: /edited")
 
             def editor_input(text, expected):
                 for char in text:
@@ -242,13 +242,42 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
             editor_input("s", "saved 15 bytes")
             editor_input("q", "exited from /bin/meinkampf with status 0")
             command("cat /edited", "\nchanged\nmiddle\n")
-            command("meinkampf /edited", "meinkampf: /edited")
+            command("meinkampf --line /edited", "meinkampf: /edited")
             editor_input("r 2 saved", "meinkampf*>")
             editor_input("s", "saved 14 bytes")
             editor_input("a discard", "a discard")
             editor_input("q", "Discard unsaved changes?")
             editor_input("y", "exited from /bin/meinkampf with status 0")
             command("cat /edited", "\nchanged\nsaved\n")
+            command("meinkampf /visual", "NORMAL  /visual")
+
+            def visual_keys(sequence):
+                for key in sequence:
+                    qmp("human-monitor-command", {"command-line": f"sendkey {key} 10"})
+                    time.sleep(.06)
+
+            visual_keys(["i", *"hello", "ret", *"world", "esc"])
+            text = wait_for("NORMAL  /visual [+]")
+            assert text.splitlines()[0] == "hello", text
+            assert text.splitlines()[1] == "world", text
+            visual_keys(["u"])
+            text = wait_for("NORMAL  /visual  1:1")
+            assert "hello" not in text and "world" not in text, text
+            visual_keys(["shift-semicolon", *"redo", "ret"])
+            wait_for("world")
+            visual_keys(["shift-semicolon", "q", "ret"])
+            wait_for("Unsaved changes")
+            visual_keys(["shift-semicolon", "w", "q", "ret"])
+            wait_for("exited from /bin/meinkampf with status 0")
+            command("cat /visual", "\nhello\nworld")
+            command("meinkampf /visual", "NORMAL  /visual")
+            visual_keys(["right", "down", "left", "up", "i", "right", "down", "left", "up", "x", "esc"])
+            text = wait_for("NORMAL  /visual [+]")
+            assert text.splitlines()[0] == "xhello", text
+            visual_keys(["u", "down", "d", "d", "shift-semicolon", "w", "q", "ret"])
+            wait_for("exited from /bin/meinkampf with status 0")
+            visual_keys(["up", "down", "left", "right"])
+            command("cat /visual", "\nhello\n")
             command("stdiocheck", "stdio checks passed")
             command("libccheck", "libc core checks passed")
             command("memcheck", "memory reliability checks passed", seconds=90)

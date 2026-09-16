@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <zenos/keys.h>
 
 #define DOCUMENT_MAX 65536U
 #define COMMAND_MAX 512U
@@ -21,6 +22,8 @@ static int input(char *line) {
         char c;
         int n = read(0, &c, 1);
         if (n < 0) return -1;
+        if (n && (unsigned char)c >= ZENOS_KEY_UP && (unsigned char)c <= ZENOS_KEY_RIGHT)
+            continue;
         if (!n || c == 4 || c == '\n') {
             line[length] = 0;
             if (n) putchar('\n');
@@ -108,15 +111,15 @@ static void edit(document_t *doc, char op, unsigned number, const char *text) {
     doc->dirty = 1;
 }
 
-static void save(document_t *doc) {
+static int save(document_t *doc) {
     char temporary[256];
     const char *suffix = ".mk-tmp";
     unsigned length = strlen(doc->path), extra = strlen(suffix);
-    if (length + extra >= sizeof(temporary)) { puts("save failed: path too long"); return; }
+    if (length + extra >= sizeof(temporary)) { puts("save failed: path too long"); return -1; }
     for (unsigned i = 0; i < length; i++) temporary[i] = doc->path[i];
     for (unsigned i = 0; i <= extra; i++) temporary[length + i] = suffix[i];
     int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL);
-    if (fd < 0) { printf("save failed: %s (errno=%d)\n", temporary, errno); return; }
+    if (fd < 0) { printf("save failed: %s (errno=%d)\n", temporary, errno); return -1; }
     unsigned written = 0;
     while (written < doc->size) {
         int n = write(fd, doc->text + written, doc->size - written);
@@ -124,17 +127,18 @@ static void save(document_t *doc) {
             int error = n < 0 ? errno : EIO;
             close(fd); unlink(temporary);
             printf("save failed (errno=%d); buffer retained\n", error);
-            return;
+            return -1;
         }
         written += n;
     }
-    if (close(fd) < 0) { puts("save failed: close; temporary file retained"); return; }
+    if (close(fd) < 0) { puts("save failed: close; temporary file retained"); return -1; }
     if (rename(temporary, doc->path) < 0) {
         printf("save failed (errno=%d); recovery file: %s\n", errno, temporary);
-        return;
+        return -1;
     }
     doc->dirty = 0;
     printf("saved %u bytes\n", doc->size);
+    return 0;
 }
 
 static void help(void) {
@@ -143,7 +147,7 @@ static void help(void) {
     puts("d 1: delete line 1. Use an actual line number, starting at 1.");
 }
 
-int main(int argc, char **argv) {
+static int line_main(int argc, char **argv) {
     if (argc != 2) { puts("usage: meinkampf <file>"); return 1; }
     document_t doc = { .path = argv[1] };
     doc.text = malloc(DOCUMENT_MAX);
@@ -198,4 +202,12 @@ int main(int argc, char **argv) {
     }
     free(doc.text);
     return status;
+}
+
+#include "editor_visual.h"
+
+int main(int argc, char **argv) {
+    if (argc == 3 && !strcmp(argv[1], "--line"))
+        return line_main(argc - 1, argv + 1);
+    return visual_main(argc, argv);
 }
