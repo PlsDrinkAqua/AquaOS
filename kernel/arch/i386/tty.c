@@ -141,7 +141,11 @@ static void terminal_scroll(void) {
 
 void terminal_putchar(char c) {
     if (terminal_escape((unsigned char)c)) return;
-    if (c == '\n') {
+    if (c == '\t') {
+        size_t spaces = 4 - terminal_column % 4;
+        while (spaces--) terminal_putchar(' ');
+        return;
+    } else if (c == '\n') {
         // Move to the next line and reset column.
         terminal_column = 0;
         terminal_row++;
