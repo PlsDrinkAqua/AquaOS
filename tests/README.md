@@ -27,6 +27,13 @@ All user programs must be rebuilt for the new exec syscall ABI.
 The shell runs standalone commands in `/bin`, with space/tab-separated
 arguments. It supports up to four pipeline stages and <, >, and >> redirection.
 Quoting, escapes, and environment variables are not implemented.
+At the prompt, Tab completes the final filename or path in the current directory
+or the directory prefix you typed. A unique directory gains a trailing `/`;
+multiple matches extend only their common prefix, and no match leaves input
+unchanged. Hidden names require a leading dot. Completion works in arguments
+and after redirection operators as well as at the start of the line; it does
+not search command installation directories. Names containing whitespace or
+shell operators are skipped because the shell cannot quote them yet.
 Bare cat copies standard input; press Ctrl+D to finish keyboard input.
 cat accepts multiple paths and '-' for stdin. Nested shells return to their
 parent with `exit` or Ctrl+D at an empty prompt.

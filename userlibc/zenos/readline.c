@@ -3,7 +3,8 @@
 #include <zenos/readline.h>
 #include <zenos/keys.h>
 
-char *zenos_readline(char *buf, size_t size) {
+char *zenos_readline_complete(char *buf, size_t size,
+                             void (*complete)(char *, size_t)) {
     size_t len = 0;
 
     if (size == 0) {
@@ -28,6 +29,13 @@ char *zenos_readline(char *buf, size_t size) {
             return buf;
         }
 
+        if (c == '\t' && complete) {
+            buf[len] = '\0';
+            complete(buf, size);
+            while (buf[len]) putchar(buf[len++]);
+            continue;
+        }
+
         if (c == '\n') {
             putchar('\n');
             buf[len] = '\0';
@@ -47,4 +55,8 @@ char *zenos_readline(char *buf, size_t size) {
             putchar(c);
         }
     }
+}
+
+char *zenos_readline(char *buf, size_t size) {
+    return zenos_readline_complete(buf, size, NULL);
 }

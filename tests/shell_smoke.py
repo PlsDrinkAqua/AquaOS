@@ -101,7 +101,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
                     time.sleep(.1)
                 raise AssertionError(f"Missing {expected!r}:\n{text}")
 
-            keys = {" ": "spc", "/": "slash", ".": "dot", "-": "minus",
+            keys = {"\t": "tab", " ": "spc", "/": "slash", ".": "dot", "-": "minus",
                     "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash"}
 
             def command(text, expected=None, seconds=12):
@@ -126,6 +126,22 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            # Exercise completion through actual keyboard input and the shell.
+            command("mkdir /tabcheck")
+            command("cd /tabcheck")
+            command("echo completed > abc")
+            command("cat a\t", "\ncompleted\n")
+            command("echo second > abd")
+            command("echo a\t", "\nab\n")
+            command("echo absent\t", "\nabsent\n")
+            command("mkdir nested")
+            command("echo child > nested/item")
+            command("cat n\ti\t", "\nchild\n")
+            command("cat /tabcheck/n\ti\t", "\nchild\n")
+            command("cat < n\ti\t", "\nchild\n")
+            command("echo hidden > .secret")
+            command("cat .s\t", "\nhidden\n")
+            command("cd ..")
             if layout_only:
                 command("exit", "shell at")
                 listing = command("ls /", "\nbin/\n")

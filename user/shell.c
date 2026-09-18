@@ -9,6 +9,8 @@
 #define LINE_MAX 128
 #define PIPELINE_MAX 4
 
+#include "shell_completion.h"
+
 typedef struct {
     char command[LINE_MAX];
     char input[LINE_MAX];
@@ -234,7 +236,7 @@ int main(void) {
 
     for (;;) {
         write_str("AquaOS> ");
-        if (!zenos_readline(line, sizeof(line))) {
+        if (!zenos_readline_complete(line, sizeof(line), complete_filename)) {
             putchar('\n');
             return 0;
         }
