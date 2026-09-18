@@ -9,6 +9,8 @@
 #define LINE_MAX 128
 #define PIPELINE_MAX 4
 
+static int script_fd = -1;
+
 #include "shell_completion.h"
 
 typedef struct {
@@ -38,8 +40,8 @@ static int has_shell_operator(const char *line) {
 
 static void copy_trimmed(char *dest, size_t size, const char *begin, const char *end) {
     size_t len;
-    while (begin < end && *begin == ' ') begin++;
-    while (end > begin && end[-1] == ' ') end--;
+    while (begin < end && (*begin == ' ' || *begin == '\t')) begin++;
+    while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) end--;
     len = (size_t)(end - begin);
     if (len >= size) len = size - 1;
     for (size_t i = 0; i < len; i++) dest[i] = begin[i];
@@ -57,11 +59,11 @@ static int parse_stage(const char *begin, const char *end, shell_stage_t *stage)
             const char *name_begin, *name_end;
             if (command_end == end) command_end = p - 1;
             if (op == '>' && p < end && *p == '>') { stage->append = 1; p++; }
-            while (p < end && *p == ' ') p++;
+            while (p < end && (*p == ' ' || *p == '\t')) p++;
             name_begin = p;
             while (p < end && *p != '<' && *p != '>') p++;
             name_end = p;
-            while (name_end > name_begin && name_end[-1] == ' ') name_end--;
+            while (name_end > name_begin && (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
             if (name_begin == name_end) return -1;
             if (op == '<') copy_trimmed(stage->input, sizeof(stage->input), name_begin, name_end);
             else copy_trimmed(stage->output, sizeof(stage->output), name_begin, name_end);
@@ -129,29 +131,30 @@ static void execute_stage(char *command) {
     exit(127);
 }
 
-static void run_pipeline(const char *line) {
+static int run_pipeline(const char *line) {
     shell_stage_t stages[PIPELINE_MAX];
     int pipes[PIPELINE_MAX - 1][2];
     int pids[PIPELINE_MAX];
-    int count;
+    int count, status = 0, launch_failed = 0;
 
     if (parse_pipeline(line, stages, &count) < 0) {
         puts("shell: invalid pipeline or redirection");
-        return;
+        return 1;
     }
-    if (zenos_terminal_begin_job() < 0) { puts("shell: terminal busy"); return; }
+    if (zenos_terminal_begin_job() < 0) { puts("shell: terminal busy"); return 1; }
     for (int i = 0; i + 1 < count; i++) {
         if (pipe(pipes[i]) < 0) {
             puts("shell: pipe failed");
             for (int j = 0; j < i; j++) { close(pipes[j][0]); close(pipes[j][1]); }
             zenos_terminal_end_job();
-            return;
+            return 1;
         }
     }
     for (int i = 0; i < count; i++) {
         int pid = fork();
-        if (pid < 0) { puts("shell: fork failed"); pids[i] = -1; continue; }
+        if (pid < 0) { puts("shell: fork failed"); pids[i] = -1; launch_failed = 1; continue; }
         if (pid == 0) {
+            if (script_fd >= 0) close(script_fd);
             if (i > 0) dup2(pipes[i - 1][0], 0);
             if (i + 1 < count) dup2(pipes[i][1], 1);
             if (stages[i].input[0]) {
@@ -172,31 +175,38 @@ static void run_pipeline(const char *line) {
         pids[i] = pid;
     }
     for (int i = 0; i + 1 < count; i++) { close(pipes[i][0]); close(pipes[i][1]); }
-    for (int i = 0; i < count; i++) if (pids[i] >= 0) wait(pids[i]);
+    for (int i = 0; i < count; i++) if (pids[i] >= 0) {
+        int result = wait(pids[i]);
+        if (result < 0) launch_failed = 1;
+        if (i == count - 1) status = result < 0 ? 1 : result;
+    }
     zenos_terminal_end_job();
+    return launch_failed ? 1 : status;
 }
 
-static void run_command(const char *line) {
+static int run_command(const char *line) {
     if (line[0] == '\0') {
-        return;
+        return 0;
     }
 
     if (has_shell_operator(line)) {
-        run_pipeline(line);
-        return;
+        return run_pipeline(line);
     }
 
-    if (strcmp(line, "cd") == 0 || strncmp(line, "cd ", 3) == 0) {
+    if (strcmp(line, "cd") == 0 || strncmp(line, "cd ", 3) == 0 || strncmp(line, "cd\t", 3) == 0) {
         const char *path = line + 2;
-        while (*path == ' ') path++;
-        if (chdir(*path ? path : "/") < 0) printf("cd: cannot change directory to %s\n", path);
-        return;
+        while (*path == ' ' || *path == '\t') path++;
+        if (chdir(*path ? path : "/") < 0) {
+            printf("cd: cannot change directory to %s\n", path);
+            return 1;
+        }
+        return 0;
     }
     if (strcmp(line, "pwd") == 0) {
         char path[256];
         if (getcwd(path, sizeof(path))) puts(path);
-        else puts("pwd: cannot read working directory");
-        return;
+        else { puts("pwd: cannot read working directory"); return 1; }
+        return 0;
     }
 
     if (strcmp(line, "exit") == 0) {
@@ -206,31 +216,117 @@ static void run_command(const char *line) {
     if (strcmp(line, "help") == 0) {
         puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, meinkampf, cd, pwd, taskinfo, exit");
         puts("Use exit or Ctrl+D to leave the shell; Ctrl+D ends cat input.");
-        return;
+        return 0;
     }
 
     if (strcmp(line, "clear") == 0) {
         zenos_terminal_clear();
-        return;
+        return 0;
     }
 
     if (strcmp(line, "about") == 0) {
         puts("AquaOS userland shell");
-        return;
+        return 0;
     }
 
     if (strcmp(line, "taskinfo") == 0) {
         zenos_taskinfo();
-        return;
+        return 0;
     }
 
-    run_pipeline(line);
+    return run_pipeline(line);
 }
 
-int main(void) {
+/* Validate the whole AND-list before executing any part of it. */
+static int run_line(char *line) {
+    char *commands[LINE_MAX / 2];
+    unsigned count = 0;
+    for (char *p = line; *p; p++) {
+        if (*p == '#' && (p == line || p[-1] == ' ' || p[-1] == '\t')) {
+            *p = '\0';
+            break;
+        }
+    }
+    char *begin = line;
+    for (char *p = line;; p++) {
+        if (*p != '&' && *p) continue;
+        int more = *p != '\0';
+        if (more && p[1] != '&') { puts("shell: expected &&"); return 2; }
+        char *end = p;
+        while (begin < end && (*begin == ' ' || *begin == '\t')) begin++;
+        while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        if (begin == end) {
+            if (!more && count == 0) return 0;
+            puts("shell: empty command in && list");
+            return 2;
+        }
+        *end = '\0';
+        /* Check pipelines even in portions that might be skipped. */
+        if (has_shell_operator(begin)) {
+            shell_stage_t stages[PIPELINE_MAX];
+            int stages_count;
+            if (parse_pipeline(begin, stages, &stages_count) < 0) {
+                puts("shell: invalid pipeline or redirection");
+                return 2;
+            }
+        }
+        commands[count++] = begin;
+        if (!more) break;
+        p++;
+        begin = p + 1;
+    }
+    int status = 0;
+    for (unsigned i = 0; i < count; i++) {
+        status = run_command(commands[i]);
+        if (status != 0) break;
+    }
+    return status;
+}
+
+static int run_script(const char *path) {
+    FILE *script = fopen(path, "r");
+    if (!script) { printf("shell: cannot open script %s\n", path); return 1; }
+    script_fd = fileno(script);
+    unsigned number = 1;
+    int status = 0;
+    for (;;) {
+        char line[LINE_MAX];
+        size_t length = 0;
+        int c;
+        while ((c = fgetc(script)) != EOF && c != '\n') {
+            if (length + 1 == sizeof(line)) {
+                printf("shell: %s:%u: line too long\n", path, number);
+                status = 2;
+                goto done;
+            }
+            if (c == 0) { puts("shell: NUL byte in script"); status = 2; goto done; }
+            line[length++] = (char)c;
+        }
+        if (ferror(script)) { puts("shell: script read error"); status = 1; break; }
+        if (c == EOF && !length) break;
+        if (length && line[length - 1] == '\r') length--;
+        line[length] = '\0';
+        status = run_line(line);
+        if (status) {
+            printf("shell: %s:%u: stopped with status %d\n", path, number, status);
+            break;
+        }
+        number++;
+        if (c == EOF) break;
+    }
+done:
+    if (fclose(script) < 0 && !status) status = 1;
+    script_fd = -1;
+    return status;
+}
+
+int main(int argc, char **argv) {
     char line[LINE_MAX];
 
     if (zenos_terminal_claim() < 0) { puts("shell: terminal busy"); return 1; }
+
+    if (argc > 2) { puts("usage: shell [script]"); return 2; }
+    if (argc == 2) return run_script(argv[1]);
 
     printf("AquaOS shell at %x\n", 0x08048000);
 
@@ -240,7 +336,7 @@ int main(void) {
             putchar('\n');
             return 0;
         }
-        run_command(line);
+        run_line(line);
     }
 
 }

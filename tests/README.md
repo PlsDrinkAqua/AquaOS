@@ -379,3 +379,24 @@ The remaining memory/filesystem regressions and offline e2fsck checks run afterw
 Rebuild the kernel ISO and shell before testing; existing development disks need
 the rebuilt `/shell` installed while QEMU is stopped, or use a fresh disk created
 with `python3 ports/tinycc/make_disk.py disk/zenos-ctrlc.img`.
+
+Native compiler self-rebuilding:
+
+```sh
+python3 ports/tinycc/build.py
+make -C user
+sh iso.sh
+python3 tests/shell_smoke.py --block-size 4096 --selfhost
+```
+
+This adds two generations of native TinyCC builds, tests each generated compiler,
+and compares their executable bytes after shutdown. It implies `--tinycc` and
+uses a disposable disk; add `--layout-only` to omit the broader regressions.
+See `ports/tinycc/README.md` for commands to rebuild manually inside ZenOS.
+
+Shell script checks run as part of the smoke suite: comments, blank lines, CRLF,
+final lines without a newline, indentation, pipelines/redirection, `&&` success
+and short-circuiting, syntax rejection before execution, long-line rejection,
+failed commands and `cd`, nested failure propagation, and Ctrl+C recovery.
+`--selfhost` now uses the installed TinyCC `build.sh` to rebuild both stages
+and run native tests. See [Shell scripts](../docs/SHELL.md).

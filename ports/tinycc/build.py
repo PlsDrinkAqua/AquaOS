@@ -81,4 +81,13 @@ for name in ['stdarg.h', 'stdbool.h', 'float.h']:
 shutil.copy2(source/'COPYING', DEST/'usr/lib/tcc/COPYING')
 for example in (HERE/'examples').glob('*.c'):
     shutil.copy2(example, DEST/'home/user'/example.name)
+
+# Preserve the exact patched inputs used by the host compiler for native rebuilds.
+native_source = DEST/'home/user/tinycc'
+native_source.mkdir()
+for entry in source.iterdir():
+    if entry.is_file() and (entry.suffix in ('.c', '.h', '.def') or entry.name == 'COPYING'):
+        shutil.copy2(entry, native_source/entry.name)
+shutil.copy2(ROOT/'user/echo.c', DEST/'home/user/echo.c')
+shutil.copy2(HERE/'examples/build.sh', native_source/'build.sh')
 print('TinyCC installation tree:', DEST)

@@ -15,9 +15,12 @@ compiler defaults to static linking and uses ZenOS crt0/libc plus libtcc1/libgcc
 
 The tables and platform findings below preserve the original audit snapshot.
 They are historical findings, not the current missing-dependency list. Native
-TinyCC self-rebuilding, broad application compatibility, large-project resource
-measurements, full time/environment APIs, and dynamic execution remain future
-milestones. The first working compiler does not establish those capabilities.
+TinyCC self-rebuilding is now covered by `--selfhost`: the installed
+compiler builds stage 2, which builds stage 3, and both run native regressions.
+The test also compares stage 2 and stage 3 byte for byte. Broad application
+compatibility, large-project resource measurements, full time/environment APIs,
+and dynamic execution remain future milestones. The first working compiler
+does not establish those capabilities.
 
 Baseline: TinyCC `release_0_9_27`, commit
 `d348a9a51d32cece842b7885d27a411436d7887b`.

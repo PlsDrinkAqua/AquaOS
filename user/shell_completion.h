@@ -1,6 +1,6 @@
 /* Complete the final shell word using directory entries. */
 static int completion_separator(char c) {
-    return c == ' ' || c == '\t' || c == '|' || c == '<' || c == '>';
+    return c == ' ' || c == '\t' || c == '|' || c == '<' || c == '>' || c == '&';
 }
 
 static void complete_filename(char *line, size_t capacity) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Boot myos.iso against a disposable ext2 disk; requires QEMU and e2fsprogs."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import socket
@@ -11,7 +12,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False):
+    tinycc = tinycc or selfhost
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
     subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
@@ -48,6 +50,20 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
             for entry in sorted(tree.rglob("*"), key=lambda p: (len(p.parts), str(p))):
                 target = "/" + entry.relative_to(tree).as_posix()
                 commands.append(f"mkdir {target}" if entry.is_dir() else f'write "{entry}" "{target}"')
+        scripts = {
+            "script-ok": "# comment\n\n  cd /subdir\n\techo first > /script-result # inline\ncat /script-result | cat > /script-copy\necho second >> /script-result && echo chain works\necho hash#word\npwd",
+            "script-fail": "cat /missing-script-input\necho wrong > /script-unwanted\n",
+            "script-cd": "cd /missing-script-dir && echo wrong > /script-unwanted\necho wrong > /script-unwanted\n",
+            "script-syntax": "echo wrong > /script-unwanted &&\n",
+            "script-long": "echo " + "x" * 128 + " > /script-unwanted\n",
+            "script-crlf": "# comment\r\necho crlf works\r\n",
+            "script-nested": "shell /script-fail\necho wrong > /script-unwanted\n",
+            "script-interrupt": "intcheck spin\necho wrong > /script-unwanted\n",
+        }
+        for name, contents in scripts.items():
+            source = tmp / name
+            source.write_bytes(contents.encode())
+            commands.append(f"write {source} /{name}")
         batch = tmp / "debugfs.txt"
         batch.write_text("\n".join(commands) + "\n")
         subprocess.run(["debugfs", "-w", "-f", str(batch), str(disk)],
@@ -102,7 +118,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
                 raise AssertionError(f"Missing {expected!r}:\n{text}")
 
             keys = {"\t": "tab", " ": "spc", "/": "slash", ".": "dot", "-": "minus",
-                    "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash"}
+                    "&": "shift-7", "#": "shift-3", "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash"}
 
             def command(text, expected=None, seconds=12):
                 qmp("human-monitor-command", {"command-line": "sendkey ret"})
@@ -123,9 +139,64 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
                 print(f"PASS: {text}", flush=True)
                 return output
 
+            def check_selfhost_artifacts():
+                if not selfhost:
+                    return
+                binaries = []
+                for stage in ("stage2", "stage3"):
+                    output = tmp / stage
+                    subprocess.run(["debugfs", "-R",
+                                    f"dump /home/user/tinycc/{stage} {output}", str(disk)],
+                                   check=True, capture_output=True)
+                    data = output.read_bytes()
+                    if not data.startswith(b"\x7fELF"):
+                        raise AssertionError(f"{stage} is not an ELF executable")
+                    binaries.append(data)
+                if binaries[0] != binaries[1]:
+                    raise AssertionError("Stage 2 and stage 3 compiler binaries differ")
+                print("PASS: stage2 and stage3 are byte-identical; SHA-256 " +
+                      hashlib.sha256(binaries[0]).hexdigest(), flush=True)
+
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            command("shell /script-ok", "exited from /bin/shell with status 0")
+            command("cat /script-result", "\nfirst\nsecond\n")
+            command("cat /script-copy", "\nfirst\n")
+            command("pwd", "\n/\n")
+            for name, status in (("script-fail", 1), ("script-cd", 1),
+                                 ("script-syntax", 2), ("script-long", 2),
+                                 ("script-nested", 1), ("missing-script", 1)):
+                command("shell /" + name, "exited from /bin/shell with status " + str(status))
+            command("shell /script-crlf", "\ncrlf works\n")
+            command("echo interactive && echo chain works", "\nchain works\n")
+            command("cat /missing-script-input && echo wrong > /script-unwanted")
+            command("echo wrong > /script-unwanted &&", "shell: empty command")
+            command("cat /script-unwanted", "exited from /bin/cat with status 1")
+            command("shell /script-interrupt", "interrupt target ready")
+            qmp("human-monitor-command", {"command-line": "sendkey ctrl-c 10"})
+            wait_for("exited from /bin/shell with status 130")
+            command("echo script interrupt survived", "\nscript interrupt survived\n")
+            if selfhost:
+                command("cd /home/user")
+                command("kirkc echo.c -o native-echo", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("./native-echo native utility works", "\nnative utility works\n")
+                command("cd tinycc")
+                command("shell build.sh", "native build complete", seconds=180)
+                wait_for("exited from /bin/shell with status 0")
+                for compiler in ("./stage2", "./stage3"):
+                    done = "exited from /home/user/tinycc/" + compiler + " with status "
+                    command(compiler + " ../hello.c -o greeting", done + "0", seconds=60)
+                    command("./greeting", "Hello from native TinyCC!")
+                    command(compiler + " -c ../companion.c -o companion.o", done + "0", seconds=60)
+                    command(compiler + " ../nativecheck.c companion.o -o check", done + "0", seconds=60)
+                    command("./check", "native compiler checks passed")
+                    command(compiler + " ../bad.c -o bad", done + "1", seconds=60)
+                    command(compiler + " ../missing.c -o missing", done + "1", seconds=60)
+                    command(compiler + " ../hello.c -o /no-dir/hello", done + "1", seconds=60)
+                    command(compiler + " ../hello.c -o greeting", done + "0", seconds=60)
+                    command("./greeting", "Hello from native TinyCC!")
+                command("cd /")
             # Exercise completion through actual keyboard input and the shell.
             command("mkdir /tabcheck")
             command("cd /tabcheck")
@@ -161,6 +232,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
                 qmp("quit")
                 proc.wait(timeout=5)
                 subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                check_selfhost_artifacts()
                 print("PASS: filesystem layout, shell restart and command lookup", flush=True)
                 return
             if scrollback_only:
@@ -377,6 +449,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False):
                 if "File not found" not in result.stderr:
                     raise AssertionError(f"Deleted path persisted: {removed}: {result.stdout}")
             print("PASS: ext2 integrity and persisted directory contents", flush=True)
+            check_selfhost_artifacts()
             print("All shell smoke checks passed.", flush=True)
         finally:
             proc.terminate()
@@ -389,5 +462,6 @@ if __name__ == "__main__":
     parser.add_argument("--tinycc", action="store_true", help="exercise the staged native TinyCC port")
     parser.add_argument("--scrollback-only", action="store_true", help="exercise terminal scrollback keys")
     parser.add_argument("--layout-only", action="store_true", help="exercise installed paths and shell restart")
+    parser.add_argument("--selfhost", action="store_true", help="rebuild TinyCC twice inside ZenOS and test both compilers (implies --tinycc)")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only)
+    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost)

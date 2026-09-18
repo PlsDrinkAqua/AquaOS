@@ -71,8 +71,8 @@ signal-mask-saving sigsetjmp.
 ## Current limits
 
 - The first target is compile-to-file, not `-run`, dynamic libraries, bounds
-  checking, backtraces, or self-rebuilding. Shared/memory output and cross-target
-  dispatch are rejected. Native self-rebuilding has not been tested.
+  checking, or backtraces. Shared/memory output and cross-target
+  dispatch are rejected. Native compiler self-rebuilding is tested below.
 - There is no environment or wall-clock ABI. Compiler search paths are explicit;
   environment lookups are absent. `__DATE__` expands to `Jan  1 1970` and
   `__TIME__` to `00:00:00`. `-bench` is rejected.
@@ -92,3 +92,65 @@ builds, varargs, integer/float/long-double operations, string scanning, and
 nonlocal jumps. Bad syntax, missing headers, and an unwritable output path must
 fail; another compilation must then succeed. Existing shell, filesystem,
 allocator and stdio regressions run afterward, with offline ext2 validation.
+
+## Rebuilding TinyCC inside ZenOS
+
+The staged tree now includes the exact patched compiler sources and generated
+`config.h` at `/home/user/tinycc`, plus the existing utility source `echo.c`
+at `/home/user/echo.c`. The source directory contains upstream top-level C,
+header and definition files and COPYING; it is sufficient for the configured
+i386 single-translation-unit build, not an upstream build-system installation.
+The host and native builds use the same patched inputs.
+
+Inside ZenOS, the complete compiler rebuild and test is now automated:
+
+```sh
+cd /home/user/tinycc
+shell build.sh
+```
+
+The script stops on failure and prints `native build complete` on success. See
+[Shell scripts](../../docs/SHELL.md) for script semantics. The individual steps
+can also be run manually:
+
+```sh
+cd /home/user
+kirkc echo.c -o native-echo
+./native-echo native utility works
+cd tinycc
+kirkc tcc.c -o stage2
+./stage2 tcc.c -o stage3
+./stage3 ../hello.c -o greeting
+./greeting
+./stage3 ../nativecheck.c ../companion.c -o check
+./check
+```
+
+The original `/usr/bin/kirkc` remains installed. The native commands need no
+extra defines or include paths: `__zenos__` is predefined by kirkc, `config.h`
+selects the static i386 target, and compiler headers/libraries use their
+installed paths. Each resulting compiler still uses the installed host-built
+libc, crt0 and runtime archives. This milestone does not rebuild those libraries
+or the kernel.
+
+To reproduce the full test on a disposable disk from the host:
+
+```sh
+python3 ports/tinycc/build.py
+make -C user
+sh iso.sh
+python3 tests/shell_smoke.py --block-size 4096 --selfhost
+```
+
+`--selfhost` implies `--tinycc`. It builds and runs the existing echo utility,
+runs `shell build.sh` to build stage 2 with the installed compiler and stage 3
+with stage 2, then tests
+both generated compilers with greetings, object-file linking, native ABI checks,
+and recovery after syntax, missing-header and output-open failures. After QEMU
+exits, it checks filesystem integrity and compares the two compiler executables
+byte for byte. Add `--layout-only` for a shorter self-hosting and shell-layout
+check that skips the broader kernel/libc regression suite.
+
+Existing development disks are not refreshed by the build. For a fresh disk
+containing the sources, run `python3 ports/tinycc/make_disk.py disk/zenos-selfhost.img`
+and boot it with the QEMU command printed by that script.
