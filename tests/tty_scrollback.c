@@ -27,8 +27,45 @@ static void expect_top(unsigned number) {
     for (size_t i = 0; i < 4; i++) assert((screen[i] & 255) == text[i]);
 }
 
+static void check_colors(void) {
+    static const unsigned colors[8] = {0, 4, 2, 6, 1, 5, 3, 7};
+    char sequence[64];
+    for (unsigned i = 0; i < 8; i++) {
+        terminal_clear();
+        snprintf(sequence, sizeof(sequence), "\033[%umA\033[%umB\033[0;%umC", 30 + i, 90 + i, 40 + i);
+        terminal_writestring(sequence);
+        assert(screen[0] == vga_entry('A', colors[i]));
+        assert(screen[1] == vga_entry('B', colors[i] | 8));
+        assert(screen[2] == vga_entry('C', 7 | (colors[i] << 4)));
+    }
+    terminal_clear();
+    terminal_writestring("\033[1;31;44mA\033[22mB\033[7mC\033[27mD\033[39;49mE\033[mF");
+    const unsigned expected[] = {0x1c, 0x14, 0x41, 0x14, 7, 7};
+    for (unsigned i = 0; i < 6; i++) assert(screen[i] == vga_entry('A' + i, expected[i]));
+    terminal_clear();
+    terminal_writestring("\033[3");
+    terminal_writestring("2mG\033[38;2;255;0;0mH\033[999999mI");
+    assert(screen[0] == vga_entry('G', 2));
+    assert(screen[1] == vga_entry('H', 2));
+    assert(screen[2] == vga_entry('I', 2));
+    terminal_writestring("\033[0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;31mJ");
+    assert(screen[3] == vga_entry('J', 2));
+    terminal_writestring("\033[2;3H\033[41m\033[K");
+    assert(screen[82] == vga_entry(' ', 0x42));
+    terminal_writestring("\033[2J");
+    assert(screen[0] == vga_entry(' ', 0x42));
+    terminal_clear();
+    terminal_writestring("\033[93mY\033[0m\n");
+    for (unsigned i = 0; i < 30; i++) terminal_putchar('\n');
+    terminal_scroll_view(100);
+    assert(screen[0] == vga_entry('Y', 14));
+    terminal_clear();
+    assert(terminal_color == 7);
+}
+
 int main(void) {
     terminal_buffer = screen;
+    check_colors();
     terminal_color = 7;
     terminal_clear();
     terminal_scroll_view(24);

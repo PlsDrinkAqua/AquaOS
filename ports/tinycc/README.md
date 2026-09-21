@@ -6,10 +6,11 @@ compiles/links static i386 ELF executables using ZenOS startup code and libc.
 It does not use Linux syscalls. The first build downloads the pinned archive;
 subsequent builds use its SHA-256-verified cache.
 
-For normal development, run `sh qemu.sh`. It creates the TinyCC development
-disk on the first launch, rebuilds the kernel ISO, and boots that disk. Subsequent
-launches preserve the disk and your source files. Existing installed user programs
-and compiler files are not automatically refreshed when their host sources change.
+For normal development, run `sh qemu.sh`. Every launch rebuilds the compiler,
+user programs and kernel ISO, creates a fresh TinyCC development disk, and boots
+the new images. `disk/zenos-dev.img` is replaced only after the fresh disk passes
+its filesystem check. Files created inside the guest are discarded on the next
+launch. Stop the previous QEMU instance before launching again.
 Extra QEMU arguments can be passed through, for example `sh qemu.sh -s -S`.
 
 To build and test each step explicitly, from the repository root:

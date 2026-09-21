@@ -12,6 +12,11 @@ char *zenos_readline(char *buf, size_t size);
 /* Completion may append to the NUL-terminated line, respecting size. */
 char *zenos_readline_complete(char *buf, size_t size,
                              void (*complete)(char *, size_t));
+/* Render must print the line without moving the cursor except through its text,
+ * and restore default colours. The buffer contains no terminal escapes. */
+char *zenos_readline_highlight(char *buf, size_t size,
+                              void (*complete)(char *, size_t),
+                              void (*render)(const char *));
 
 #ifdef __cplusplus
 }

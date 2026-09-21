@@ -3,14 +3,17 @@
 #include <zenos/readline.h>
 #include <zenos/keys.h>
 
-char *zenos_readline_complete(char *buf, size_t size,
-                             void (*complete)(char *, size_t)) {
+char *zenos_readline_highlight(char *buf, size_t size,
+                              void (*complete)(char *, size_t),
+                              void (*render)(const char *)) {
     size_t len = 0;
+    size_t displayed = 0;
 
     if (size == 0) {
         return buf;
     }
 
+    buf[0] = '\0';
     for (;;) {
         char c;
 
@@ -32,8 +35,11 @@ char *zenos_readline_complete(char *buf, size_t size,
         if (c == '\t' && complete) {
             buf[len] = '\0';
             complete(buf, size);
-            while (buf[len]) putchar(buf[len++]);
-            continue;
+            while (buf[len]) {
+                if (!render) putchar(buf[len]);
+                len++;
+            }
+            goto redraw;
         }
 
         if (c == '\n') {
@@ -45,16 +51,29 @@ char *zenos_readline_complete(char *buf, size_t size,
         if (c == '\b') {
             if (len > 0) {
                 len--;
-                putchar('\b');
+                if (!render) putchar('\b');
             }
-            continue;
+            goto redraw;
         }
 
+        if (render && (unsigned char)c < 32) continue;
         if (len + 1 < size) {
             buf[len++] = c;
-            putchar(c);
+            if (!render) putchar(c);
+        }
+redraw:
+        buf[len] = '\0';
+        if (render) {
+            while (displayed) { putchar('\b'); displayed--; }
+            render(buf);
+            displayed = len;
         }
     }
+}
+
+char *zenos_readline_complete(char *buf, size_t size,
+                             void (*complete)(char *, size_t)) {
+    return zenos_readline_highlight(buf, size, complete, NULL);
 }
 
 char *zenos_readline(char *buf, size_t size) {

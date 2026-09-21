@@ -20,8 +20,51 @@ static uint16_t lines[TERMINAL_LINES][80];
 static size_t live_top;
 static size_t history_count;
 static size_t view_offset;
-static unsigned escape_state, escape_arg[2], escape_index;
+#define ESCAPE_ARGS 16
+static unsigned escape_state, escape_arg[ESCAPE_ARGS], escape_index;
+static bool escape_invalid;
+static uint8_t terminal_fg = VGA_COLOR_LIGHT_GREY, terminal_bg;
+static bool terminal_bold, terminal_reverse;
 void terminal_putentryat(unsigned char c, uint8_t color, size_t x, size_t y);
+
+static void terminal_update_color(void) {
+    uint8_t fg = terminal_fg | (terminal_bold ? 8 : 0);
+    uint8_t bg = terminal_bg;
+    /* VGA bit 7 controls blink, so backgrounds use the base eight colours. */
+    terminal_color = terminal_reverse ? (bg | ((fg & 7) << 4))
+                                      : (fg | (bg << 4));
+}
+
+static void terminal_reset_color(void) {
+    terminal_fg = VGA_COLOR_LIGHT_GREY;
+    terminal_bg = VGA_COLOR_BLACK;
+    terminal_bold = terminal_reverse = false;
+    terminal_update_color();
+}
+
+static void terminal_sgr(void) {
+    static const uint8_t colors[8] = {0, 4, 2, 6, 1, 5, 3, 7};
+    for (unsigned i = 0; i <= escape_index; i++) {
+        unsigned arg = escape_arg[i];
+        if (arg == 0) terminal_reset_color();
+        else if (arg == 1) terminal_bold = true;
+        else if (arg == 22) terminal_bold = false;
+        else if (arg == 7) terminal_reverse = true;
+        else if (arg == 27) terminal_reverse = false;
+        else if (arg == 39) terminal_fg = VGA_COLOR_LIGHT_GREY;
+        else if (arg == 49) terminal_bg = VGA_COLOR_BLACK;
+        else if (arg >= 30 && arg <= 37) terminal_fg = colors[arg - 30];
+        else if (arg >= 40 && arg <= 47) terminal_bg = colors[arg - 40];
+        else if (arg >= 90 && arg <= 97) terminal_fg = colors[arg - 90] | 8;
+        else if (arg == 38 || arg == 48) {
+            /* Skip unsupported indexed/RGB colours as a single attribute. */
+            if (i + 1 <= escape_index && escape_arg[i + 1] == 5) i += 2;
+            else if (i + 1 <= escape_index && escape_arg[i + 1] == 2) i += 4;
+            else break;
+        }
+    }
+    terminal_update_color();
+}
 
 /* Bounded CSI subset used by full-screen user programs. */
 static int terminal_escape(unsigned char c) {
@@ -32,16 +75,25 @@ static int terminal_escape(unsigned char c) {
     }
     if (escape_state == 1) {
         escape_state = c == '[' ? 2 : 0;
-        escape_arg[0] = escape_arg[1] = escape_index = 0;
+        for (unsigned i = 0; i < ESCAPE_ARGS; i++) escape_arg[i] = 0;
+        escape_index = 0;
+        escape_invalid = false;
         return 1;
     }
     if (c >= '0' && c <= '9') {
         if (escape_arg[escape_index] < 1000)
             escape_arg[escape_index] = escape_arg[escape_index] * 10 + c - '0';
+        else escape_invalid = true;
         return 1;
     }
-    if (c == ';' && !escape_index) { escape_index = 1; return 1; }
+    if (c == ';') {
+        if (escape_index + 1 < ESCAPE_ARGS) escape_index++;
+        else escape_invalid = true;
+        return 1;
+    }
+    if (c < 0x40 || c > 0x7e) { escape_invalid = true; return 1; }
     escape_state = 0;
+    if (escape_invalid) return 1;
     if (c == 'H' || c == 'f') {
         unsigned row = escape_arg[0] ? escape_arg[0] - 1 : 0;
         unsigned col = escape_arg[1] ? escape_arg[1] - 1 : 0;
@@ -55,9 +107,7 @@ static int terminal_escape(unsigned char c) {
         for (size_t x = terminal_column; x < VGA_WIDTH; x++)
             terminal_putentryat(' ', terminal_color, x, terminal_row);
     } else if (c == 'm') {
-        terminal_color = escape_arg[0] == 7
-            ? vga_entry_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_GREY)
-            : vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        terminal_sgr();
     }
     return 1;
 }
@@ -99,7 +149,7 @@ void terminal_initialize(void) {
 
 void terminal_clear(void) {
     escape_state = 0;
-    terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    terminal_reset_color();
     live_top = 0;
     history_count = 0;
     view_offset = 0;
@@ -115,6 +165,9 @@ void terminal_clear(void) {
 }
 
 void terminal_setcolor(uint8_t color) {
+    terminal_fg = color & 15;
+    terminal_bg = (color >> 4) & 7;
+    terminal_bold = terminal_reverse = false;
     terminal_color = color;
 }
 
@@ -150,6 +203,10 @@ void terminal_putchar(char c) {
         terminal_column = 0;
         terminal_row++;
     } else if (c == '\b') {
+        if (terminal_column == 0 && terminal_row > 0) {
+            terminal_row--;
+            terminal_column = VGA_WIDTH;
+        }
         if (terminal_column > 0) {
             terminal_column--;
             terminal_putentryat(' ', terminal_color, terminal_column, terminal_row);

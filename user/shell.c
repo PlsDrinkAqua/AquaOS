@@ -12,6 +12,7 @@
 static int script_fd = -1;
 
 #include "shell_completion.h"
+#include "shell_highlight.h"
 
 typedef struct {
     char command[LINE_MAX];
@@ -331,8 +332,8 @@ int main(int argc, char **argv) {
     printf("AquaOS shell at %x\n", 0x08048000);
 
     for (;;) {
-        write_str("AquaOS> ");
-        if (!zenos_readline_complete(line, sizeof(line), complete_filename)) {
+        write_str("\033[0;92mAquaOS\033[96m>\033[0m ");
+        if (!zenos_readline_highlight(line, sizeof(line), complete_filename, highlight_line)) {
             putchar('\n');
             return 0;
         }
