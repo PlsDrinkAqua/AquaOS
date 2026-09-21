@@ -83,5 +83,40 @@ int main(void) {
     input = "cat";
     assert(zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line) == buf);
     assert(!strcmp(buf, "cat"));
+    terminal_clear(); input = "ct\202a\n";
+    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    assert(!strcmp(buf, "cat"));
+    terminal_clear(); input = "xcat\204\206\205!\202\b\n";
+    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    assert(!strcmp(buf, "ca!"));
+    terminal_clear(); input = "ca file\204\203\203\t\n";
+    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    assert(!strcmp(buf, "cat file"));
+    terminal_clear(); input = "draft\202\200\201!\n";
+    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    assert(!strcmp(buf, "draf!t"));
+    terminal_clear(); input = "\200\n";
+    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    assert(!strcmp(buf, "draf!t"));
+    char tiny[4];
+    terminal_clear(); input = "abcd\204Z\206Z\n";
+    zenos_readline_highlight(tiny, sizeof(tiny), complete, highlight_line);
+    assert(!strcmp(tiny, "Zbc"));
+    terminal_clear();
+    terminal_writestring("\033[25;1HPROMPT> ");
+    memset(long_input, 'x', 100);
+    long_input[100] = ZENOS_KEY_HOME; long_input[101] = ZENOS_KEY_DELETE;
+    long_input[102] = 'Y'; long_input[103] = ZENOS_KEY_END;
+    long_input[104] = '\n'; long_input[105] = 0;
+    input = long_input;
+    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    assert(strlen(buf) == 100 && buf[0] == 'Y');
+    expect(22 * 80, 'P', 7); expect(22 * 80 + 8, 'Y', 12);
+    readline_history_count = 0;
+    for (unsigned i = 0; i < 40; i++) {
+        char command[16]; snprintf(command, sizeof(command), "cmd%u", i);
+        remember(command, strlen(command));
+    }
+    assert(readline_history_count == 32 && !strcmp(history[0], "cmd8"));
     return 0;
 }

@@ -92,6 +92,9 @@ void keyboard_isr() {
         else if (scancode == 0x50) keyboard_deliver(KEY_DOWN);
         else if (scancode == 0x4B) keyboard_deliver(KEY_LEFT);
         else if (scancode == 0x4D) keyboard_deliver(KEY_RIGHT);
+        else if (scancode == 0x47) keyboard_deliver(KEY_HOME);
+        else if (scancode == 0x4F) keyboard_deliver(KEY_END);
+        else if (scancode == 0x53) keyboard_deliver(KEY_DELETE);
         else if (scancode == 0x1D || scancode == 0x9D)
             ctrl_down = scancode == 0x1D;
         if (scancode != 0x1C && scancode != 0x35) return;

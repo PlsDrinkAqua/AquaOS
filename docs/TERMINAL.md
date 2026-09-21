@@ -14,6 +14,24 @@ an explicitly typed path; this indicates a candidate program, not a guarantee
 that loading it will succeed. Highlighting never changes the command buffer.
 Tab completion and backspace refresh the colours, including on wrapped lines.
 
+Left/Right move through input; Home/End jump to its boundaries. Typing inserts
+at the cursor, Backspace removes the preceding character, and Delete removes
+the next character. Tab completes the prefix before the cursor and preserves
+the remaining text. Up/Down browse the last 32 submitted lines (up to 127 bytes
+each), with consecutive duplicates omitted. Down past the newest entry restores
+the unfinished draft and its cursor. History lasts for the process lifetime.
+Ctrl+C cancels without adding history; Enter submits the entire line.
+
+The editor uses ZenOS-specific `CSI 1;N~` / `CSI 2;N~` output sequences to move
+backward/forward by N cells across wrapped rows without erasing text. These are
+terminal extensions, not standard ANSI cursor movement. A reverse-video block follows
+the editing position and is hidden while viewing scrollback.
+The block swaps the cell's foreground/background on screen only; moving it
+restores the original character and colours. The hardware underline is disabled.
+Navigation moves only the cursor. Text edits use ZenOS `CSI 3~` / `CSI 4~`
+begin/end redraw sequences: intermediate changes stay in the terminal backing
+buffer until the completed line and final cursor position are ready to display.
+
 Programs can print ANSI SGR sequences through `printf`, `fputs`, or `write`:
 
 ```c

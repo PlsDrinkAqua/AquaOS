@@ -7,7 +7,9 @@
 extern "C" {
 #endif
 
-/* Returns buf, or NULL on an error or EOF before any characters. */
+/* Returns buf, or NULL on an error or EOF before any characters.
+ * Supports cursor editing and 32 entries of process-local history (127 bytes
+ * per entry). Uses ZenOS terminal cursor extensions for wrapped lines. */
 char *zenos_readline(char *buf, size_t size);
 /* Completion may append to the NUL-terminated line, respecting size. */
 char *zenos_readline_complete(char *buf, size_t size,

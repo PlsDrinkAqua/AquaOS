@@ -6,7 +6,10 @@ enum {
     KEY_UP = 0x80,
     KEY_DOWN,
     KEY_LEFT,
-    KEY_RIGHT
+    KEY_RIGHT,
+    KEY_HOME,
+    KEY_END,
+    KEY_DELETE
 };
 
 void keyboard_isr(void);

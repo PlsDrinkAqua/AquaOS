@@ -118,6 +118,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 raise AssertionError(f"Missing {expected!r}:\n{text}")
 
             keys = {"\t": "tab", " ": "spc", "/": "slash", ".": "dot", "-": "minus",
+                    "\x80": "up", "\x81": "down", "\x82": "left", "\x83": "right",
+                    "\x84": "home", "\x85": "end", "\x86": "delete", "\b": "backspace",
                     "&": "shift-7", "#": "shift-3", "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash"}
 
             def command(text, expected=None, seconds=12):
@@ -198,6 +200,10 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                     command("./greeting", "Hello from native TinyCC!")
                 command("cd /")
             # Exercise completion through actual keyboard input and the shell.
+            command("echo ct\x82a", "\ncat\n")
+            command("xecho edit\x84\x86\x85s", "\nedits\n")
+            command("echo draft\x82\x80\x81x", "\ndrafxt\n")
+            command("\x80\x80", "\ndrafxt\n")
             command("mkdir /tabcheck")
             command("cd /tabcheck")
             command("echo completed > abc")
