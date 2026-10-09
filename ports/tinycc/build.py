@@ -67,7 +67,7 @@ if DEST.exists(): shutil.rmtree(DEST)
 (DEST/'usr/lib/tcc').mkdir(parents=True)
 (DEST/'usr/bin').mkdir(parents=True)
 (DEST/'home/user').mkdir(parents=True)
-run([cc, '-T', ROOT/'user/user.ld', '-o', DEST/'usr/bin/kirkc', ROOT/'userlibc/crt0.o', BUILD/'tcc.o', ROOT/'userlibc/libc.a', '-nostdlib', '-lgcc', '-Wl,-s'])
+run([cc, '-T', ROOT/'user/user.ld', '-o', DEST/'usr/bin/tcc', ROOT/'userlibc/crt0.o', BUILD/'tcc.o', ROOT/'userlibc/libc.a', '-nostdlib', '-lgcc', '-Wl,-s'])
 for name in ['libtcc1.c', 'alloca86.S', 'alloca86-bt.S']:
     run([cc, *flags, '-c', source/'lib'/name, '-o', BUILD/(Path(name).stem+'.o')])
 run([ar, 'rcs', DEST/'usr/lib/tcc/libtcc1.a', *[BUILD/(n+'.o') for n in ['libtcc1','alloca86','alloca86-bt']]])

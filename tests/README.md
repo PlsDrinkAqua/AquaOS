@@ -348,7 +348,7 @@ successful compilation. The regular smoke suite runs afterward. A 4 KiB ext2
 image is required because the runtime archives exceed 1 KiB-block file limits.
 
 `python3 ports/tinycc/make_disk.py` creates a separate development
-disk at `disk/zenos-dev.img` with `/tcc`, headers, libraries and `/hello.c`; boot
+disk at `disk/zenos-dev.img` with `/usr/bin/tcc`, headers, libraries and `/home/user/hello.c`; boot
 it together with `myos.iso`. It never overwrites an existing disk. See
 `ports/tinycc/README.md` for the boot command, implementation details and limits.
 

@@ -22,7 +22,7 @@ def quote(path):
 
 def migrate(image):
     tree = ROOT / 'ports/tinycc/root'
-    if not (tree / 'usr/bin/kirkc').is_file():
+    if not (tree / 'usr/bin/tcc').is_file():
         raise SystemExit('Run python3 ports/tinycc/build.py first')
     backup = image.with_name(image.name + '.before-layout.bak')
     if backup.exists():
@@ -95,8 +95,10 @@ def migrate(image):
                 old = Path('/') / program
                 if exists(old):
                     move(old, Path('/bin') / program)
-            if exists(Path('/kirkc')):
-                move(Path('/kirkc'), Path('/usr/bin/kirkc'))
+            # Accept the previous compiler name on legacy development disks.
+            for old in ['/tcc', '/kirkc', '/usr/bin/kirkc']:
+                if exists(Path(old)):
+                    move(Path(old), Path('/usr/bin/tcc'))
             for example in (ROOT / 'ports/tinycc/examples').glob('*.c'):
                 old = Path('/') / example.name
                 if exists(old):

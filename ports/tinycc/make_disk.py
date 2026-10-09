@@ -13,7 +13,7 @@ args = parser.parse_args()
 output = args.output.resolve()
 if output.exists(): raise SystemExit(f'Refusing to overwrite {output}; choose a new output path')
 tree = ROOT/'ports/tinycc/root'
-if not (tree/'usr/bin/kirkc').is_file(): raise SystemExit('Run python3 ports/tinycc/build.py first')
+if not (tree/'usr/bin/tcc').is_file(): raise SystemExit('Run python3 ports/tinycc/build.py first')
 subprocess.run(['make', '-C', str(ROOT/'user')], check=True)
 output.parent.mkdir(parents=True, exist_ok=True)
 def quote(path): return '"' + str(path).replace('\\', '\\\\').replace('"', '\\"') + '"'

@@ -1,7 +1,7 @@
 # TinyCC on ZenOS
 
 This port builds TinyCC 0.9.27 (`d348a9a51d32cece842b7885d27a411436d7887b`)
-with the existing i686-elf toolchain. The resulting `/usr/bin/kirkc` runs on ZenOS and
+with the existing i686-elf toolchain. The resulting `/usr/bin/tcc` runs on ZenOS and
 compiles/links static i386 ELF executables using ZenOS startup code and libc.
 It does not use Linux syscalls. The first build downloads the pinned archive;
 subsequent builds use its SHA-256-verified cache.
@@ -40,23 +40,23 @@ Inside ZenOS:
 
 ```sh
 cd /home/user
-kirkc hello.c -o hello
+tcc hello.c -o hello
 ./hello
 meinkampf hello.c
-kirkc hello.c -o hello
+tcc hello.c -o hello
 ./hello
 ```
 
 `hello.c` is installed in `/home/user` on the development disk. The expected greeting is
 `Hello from native TinyCC!`. Sources can include headers in `/usr/include`; libraries
-are in `/usr/lib` and `/usr/lib/tcc`. `kirkc -c` produces objects, and multiple source/object
+are in `/usr/lib` and `/usr/lib/tcc`. `tcc -c` produces objects, and multiple source/object
 inputs can be linked. `-nostdlib` retains its normal opt-out meaning.
 
 ## Integration
 
 `build.py` applies explicit, checked substitutions to a fresh pinned source
 extraction. A mismatched patch fails the build. The patched sources remain in
-`build/` for inspection. Output in `root/` contains `/usr/bin/kirkc`, ZenOS headers,
+`build/` for inspection. Output in `root/` contains `/usr/bin/tcc`, ZenOS headers,
 TinyCC's stdarg/stdbool/float headers, `crt0.o`, `libc.a`, `libtcc1.a`, the matching
 cross-toolchain `libgcc.a`, and example/regression sources. TinyCC's license is
 installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
@@ -116,10 +116,10 @@ can also be run manually:
 
 ```sh
 cd /home/user
-kirkc echo.c -o native-echo
+tcc echo.c -o native-echo
 ./native-echo native utility works
 cd tinycc
-kirkc tcc.c -o stage2
+tcc tcc.c -o stage2
 ./stage2 tcc.c -o stage3
 ./stage3 ../hello.c -o greeting
 ./greeting
@@ -127,8 +127,8 @@ kirkc tcc.c -o stage2
 ./check
 ```
 
-The original `/usr/bin/kirkc` remains installed. The native commands need no
-extra defines or include paths: `__zenos__` is predefined by kirkc, `config.h`
+The original `/usr/bin/tcc` remains installed. The native commands need no
+extra defines or include paths: `__zenos__` is predefined by tcc, `config.h`
 selects the static i386 target, and compiler headers/libraries use their
 installed paths. Each resulting compiler still uses the installed host-built
 libc, crt0 and runtime archives. This milestone does not rebuild those libraries

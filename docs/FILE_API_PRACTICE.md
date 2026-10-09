@@ -18,7 +18,7 @@ cd /home/user
 mkdir practice
 cd practice
 meinkampf create.c
-kirkc create.c -o create
+tcc create.c -o create
 ./create
 ```
 

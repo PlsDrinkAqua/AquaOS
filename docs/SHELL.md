@@ -9,7 +9,7 @@ A script's `cd` changes its own working directory, not its parent's.
 ```sh
 # Build and run a program.
 cd /home/user
-kirkc hello.c -o hello && ./hello
+tcc hello.c -o hello && ./hello
 ```
 
 Blank lines are ignored. `#` starts a comment at the beginning of a line or

@@ -45,7 +45,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         commands += [f"write {ROOT / 'user' / name} /bin/{name}" for name in programs]
         if tinycc:
             tree = ROOT / "ports/tinycc/root"
-            if not (tree / "usr/bin/kirkc").is_file():
+            if not (tree / "usr/bin/tcc").is_file():
                 raise RuntimeError("Run python3 ports/tinycc/build.py first")
             for entry in sorted(tree.rglob("*"), key=lambda p: (len(p.parts), str(p))):
                 target = "/" + entry.relative_to(tree).as_posix()
@@ -181,7 +181,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             command("echo script interrupt survived", "\nscript interrupt survived\n")
             if selfhost:
                 command("cd /home/user")
-                command("kirkc echo.c -o native-echo", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("tcc echo.c -o native-echo", "exited from /usr/bin/tcc with status 0", seconds=60)
                 command("./native-echo native utility works", "\nnative utility works\n")
                 command("cd tinycc")
                 command("shell build.sh", "native build complete", seconds=180)
@@ -231,9 +231,9 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("exit", "exited from /bin/shell with status 0")
                 if tinycc:
                     command("cd /home/user")
-                    command("kirkc hello.c -o native-hello", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                    command("tcc hello.c -o native-hello", "exited from /usr/bin/tcc with status 0", seconds=60)
                     command("./native-hello", "Hello from native TinyCC!")
-                    command("kirkc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                    command("tcc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/tcc with status 0", seconds=60)
                     command("./nativecheck", "native compiler checks passed")
                 qmp("quit")
                 proc.wait(timeout=5)
@@ -304,17 +304,17 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             interrupt_command("intcheck")
             if tinycc:
                 command("cd /home/user")
-                command("kirkc hello.c -o native-hello", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("tcc hello.c -o native-hello", "exited from /usr/bin/tcc with status 0", seconds=60)
                 command("./native-hello", "Hello from native TinyCC!")
-                command("kirkc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("tcc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/tcc with status 0", seconds=60)
                 command("./nativecheck", "native compiler checks passed")
-                command("kirkc -c companion.c -o companion.o", "exited from /usr/bin/kirkc with status 0", seconds=60)
-                command("kirkc nativecheck.c companion.o -o nativecheck", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("tcc -c companion.c -o companion.o", "exited from /usr/bin/tcc with status 0", seconds=60)
+                command("tcc nativecheck.c companion.o -o nativecheck", "exited from /usr/bin/tcc with status 0", seconds=60)
                 command("./nativecheck", "native compiler checks passed")
-                command("kirkc bad.c -o bad", "exited from /usr/bin/kirkc with status 1", seconds=60)
-                command("kirkc missing.c -o missing", "exited from /usr/bin/kirkc with status 1", seconds=60)
-                command("kirkc hello.c -o /no-dir/hello", "exited from /usr/bin/kirkc with status 1", seconds=60)
-                command("kirkc hello.c -o native-hello", "exited from /usr/bin/kirkc with status 0", seconds=60)
+                command("tcc bad.c -o bad", "exited from /usr/bin/tcc with status 1", seconds=60)
+                command("tcc missing.c -o missing", "exited from /usr/bin/tcc with status 1", seconds=60)
+                command("tcc hello.c -o /no-dir/hello", "exited from /usr/bin/tcc with status 1", seconds=60)
+                command("tcc hello.c -o native-hello", "exited from /usr/bin/tcc with status 0", seconds=60)
                 command("./native-hello", "Hello from native TinyCC!")
             # Send editor input without the shell command helper's clear command.
             command("cd /")
