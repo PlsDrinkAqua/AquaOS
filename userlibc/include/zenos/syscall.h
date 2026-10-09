@@ -1,5 +1,6 @@
 #ifndef _ZENOS_SYSCALL_H
 #define _ZENOS_SYSCALL_H 1
+#include <stdint.h>
 
 enum {
     SYS_PUTCHAR = 0,
@@ -37,8 +38,8 @@ enum {
 extern "C" {
 #endif
 
-int zenos_syscall1(int num, int arg1);
-int zenos_syscall3(int num, int arg1, int arg2, int arg3);
+intptr_t zenos_syscall1(int num, intptr_t arg1);
+intptr_t zenos_syscall3(int num, intptr_t arg1, intptr_t arg2, intptr_t arg3);
 
 #ifdef __cplusplus
 }

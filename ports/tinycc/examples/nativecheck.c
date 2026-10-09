@@ -20,9 +20,15 @@ static int sum(int n, ...) {
 extern int companion(int);
 int main(void) {
     char text[128]; int n; double d;
+    CHECK(stdout != NULL && stderr != NULL);
     volatile unsigned long long large = 100000000000ULL, divisor = 7;
     CHECK(large / divisor == 14285714285ULL && large % divisor == 5);
-    CHECK(sizeof(long double) == 12 && sizeof(void *) == 4 && INT_MAX == 2147483647);
+#ifdef __x86_64__
+    CHECK(sizeof(long double) == 16 && sizeof(void *) == 8 && sizeof(long) == 8);
+#else
+    CHECK(sizeof(long double) == 12 && sizeof(void *) == 4);
+#endif
+    CHECK(INT_MAX == 2147483647);
     CHECK(sum(3, 7, 11, 13) == 31 && companion(21) == 42);
     CHECK(sscanf("42 1.25", "%d %lf", &n, &d) == 2 && n == 42 && d == 1.25);
     CHECK(snprintf(text, sizeof(text), "%.2f %.3Lf", d * 2, 1.125L) == 10);

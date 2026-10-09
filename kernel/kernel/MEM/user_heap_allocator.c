@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <kernel/layout.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include "kernel/vmm.h"
@@ -7,7 +8,7 @@
 #include "kernel/user_heap.h"
 #include <libk/string.h>
 
-#define PAGE_SIZE       0x1000U
+#define PAGE_SIZE       0x1000UL
 #define ALIGN_UP(x, a)  (((x) + (a) - 1) & ~((a) - 1))
 #define ALIGN_DOWN(x,a) ((x) & ~((a) - 1))
 
@@ -86,7 +87,7 @@ void *sys_sbrk(intptr_t increment) {
             }
 
             /* Never expose data left by another process in a recycled frame. */
-            kmemset((void *)(phys + 0xC0000000U), 0, PAGE_SIZE);
+            kmemset((void *)(phys + KERNEL_DIRECT_BASE), 0, PAGE_SIZE);
             if (vmm_map_page(va, phys, VMM_PRESENT | VMM_RW | VMM_USER) < 0) {
                 pmm_free_frame(phys);
 

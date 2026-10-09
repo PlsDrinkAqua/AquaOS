@@ -2,6 +2,7 @@
 #define _VMM
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <kernel/paging.h>
 
@@ -23,7 +24,7 @@ int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags);
 uint32_t vmm_translate(uintptr_t vaddr);
 
 /* Check that every page in a userspace range is present and accessible. */
-bool vmm_user_range_valid(const void *ptr, uint32_t size, bool writable);
+bool vmm_user_range_valid(const void *ptr, size_t size, bool writable);
 
 int vmm_unmap_page(uintptr_t vaddr, bool free_frame);
 

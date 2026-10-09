@@ -3,5 +3,5 @@
 #include <zenos/sysret.h>
 
 int exec(const char *path, const char *const argv[]) {
-    return zenos_sysret(zenos_syscall3(SYS_EXEC, (int)path, (int)argv, 0));
+    return zenos_sysret(zenos_syscall3(SYS_EXEC, (intptr_t)path, (intptr_t)argv, 0));
 }

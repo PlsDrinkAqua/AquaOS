@@ -1,7 +1,7 @@
 #include <zenos/syscall.h>
 
-int zenos_syscall1(int num, int arg1) {
-    int ret;
+intptr_t zenos_syscall1(int num, intptr_t arg1) {
+    intptr_t ret;
 
     __asm__ volatile (
         "int $0x80"
@@ -13,8 +13,8 @@ int zenos_syscall1(int num, int arg1) {
     return ret;
 }
 
-int zenos_syscall3(int num, int arg1, int arg2, int arg3) {
-    int ret;
+intptr_t zenos_syscall3(int num, intptr_t arg1, intptr_t arg2, intptr_t arg3) {
+    intptr_t ret;
 
     __asm__ volatile (
         "int $0x80"

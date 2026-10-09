@@ -53,7 +53,7 @@ void syscall_handler(interrupt_frame_t *regs)
             char c = (char)regs->ebx;
             int result = fd_write(1, &c, 1);
             if (result < 0) {
-                regs->eax = (uint32_t)result;
+                regs->eax = (uintptr_t)result;
                 break;
             }
             regs->eax = regs->ebx;
@@ -62,12 +62,13 @@ void syscall_handler(interrupt_frame_t *regs)
 
         case SYS_WRITE: {
             const char *buf = (const char *)regs->ecx;
-            uint32_t count = regs->edx;
+            size_t count = regs->edx;
+            if (count > 0x7fffffffU) { regs->eax = (uintptr_t)-K_EINVAL; break; }
             uint32_t written = 0;
             char chunk[256];
 
             if (!vmm_user_range_valid(buf, count, false)) {
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
                 break;
             }
             while (written < count) {
@@ -75,7 +76,7 @@ void syscall_handler(interrupt_frame_t *regs)
                 int n;
                 if (wanted > sizeof(chunk)) wanted = sizeof(chunk);
                 if (copy_from_user(chunk, buf + written, wanted) < 0) {
-                    regs->eax = (uint32_t)-K_EFAULT;
+                    regs->eax = (uintptr_t)-K_EFAULT;
                     break;
                 }
                 n = fd_write((int)regs->ebx, chunk, wanted);
@@ -84,24 +85,25 @@ void syscall_handler(interrupt_frame_t *regs)
                     return;
                 }
                 if (n < 0) {
-                    regs->eax = written ? written : (uint32_t)n;
+                    regs->eax = written ? written : (uintptr_t)n;
                     break;
                 }
-                written += (uint32_t)n;
+                written += (uintptr_t)n;
                 regs->eax = written;
-                if ((uint32_t)n < wanted) break;
+                if ((uintptr_t)n < wanted) break;
             }
             break;
         }
 
         case SYS_GETKEY:
             regs->eax = task_terminal_can_read(task_current()) ?
-                (uint32_t)keyboard_getchar() : (uint32_t)-K_EIO;
+                (uintptr_t)keyboard_getchar() : (uintptr_t)-K_EIO;
             break;
 
         case SYS_READ: {
             char *buf = (char *)regs->ecx;
-            uint32_t count = regs->edx;
+            size_t count = regs->edx;
+            if (count > 0x7fffffffU) { regs->eax = (uintptr_t)-K_EINVAL; break; }
             uint32_t read = 0;
 
             if (count == 0) {
@@ -110,7 +112,7 @@ void syscall_handler(interrupt_frame_t *regs)
             }
 
             if (!vmm_user_range_valid(buf, count, true)) {
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
                 break;
             }
 
@@ -126,7 +128,7 @@ void syscall_handler(interrupt_frame_t *regs)
                         return;
                     }
                     if (n < 0) {
-                        regs->eax = read ? read : (uint32_t)n;
+                        regs->eax = read ? read : (uintptr_t)n;
                         break;
                     }
                     if (n == 0) {
@@ -134,17 +136,17 @@ void syscall_handler(interrupt_frame_t *regs)
                         break;
                     }
                     if (copy_to_user(buf + read, chunk, (size_t)n) < 0) {
-                        regs->eax = (uint32_t)-K_EFAULT;
+                        regs->eax = (uintptr_t)-K_EFAULT;
                         break;
                     }
-                    read += (uint32_t)n;
+                    read += (uintptr_t)n;
                     regs->eax = read;
                 }
                 break;
             }
 
             if (!task_terminal_can_read(task_current())) {
-                regs->eax = (uint32_t)-K_EIO;
+                regs->eax = (uintptr_t)-K_EIO;
                 break;
             }
 
@@ -161,7 +163,7 @@ void syscall_handler(interrupt_frame_t *regs)
                 if (c == 4) break; /* Consume terminal EOF without copying it. */
 
                 if (copy_to_user(buf + read, &c, 1) < 0) {
-                    regs->eax = (uint32_t)-K_EFAULT;
+                    regs->eax = (uintptr_t)-K_EFAULT;
                     break;
                 }
                 read++;
@@ -174,7 +176,7 @@ void syscall_handler(interrupt_frame_t *regs)
         }
 
         case SYS_TERMINAL_CONTROL:
-            regs->eax = (uint32_t)task_terminal_control(regs->ebx);
+            regs->eax = (uintptr_t)task_terminal_control(regs->ebx);
             break;
 
         case SYS_CLEAR:
@@ -199,7 +201,7 @@ void syscall_handler(interrupt_frame_t *regs)
                     task_preemption_enable();
                 }
             }
-            regs->eax = (uint32_t)result;
+            regs->eax = (uintptr_t)result;
             break;
         }
 
@@ -219,24 +221,24 @@ void syscall_handler(interrupt_frame_t *regs)
                     task_preemption_enable();
                 }
             }
-            regs->eax = (uint32_t)result;
+            regs->eax = (uintptr_t)result;
             break;
         }
 
         case SYS_CHDIR: {
             char path[TASK_IMAGE_PATH_BYTES];
             if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
-                regs->eax = (uint32_t)-K_EFAULT;
-            else regs->eax = (uint32_t)task_chdir(path);
+                regs->eax = (uintptr_t)-K_EFAULT;
+            else regs->eax = (uintptr_t)task_chdir(path);
             break;
         }
 
         case SYS_GETCWD: {
             const char *cwd = task_current()->cwd;
             size_t length = kstrlen(cwd) + 1;
-            if (regs->ecx < length) regs->eax = (uint32_t)-K_ERANGE;
+            if (regs->ecx < length) regs->eax = (uintptr_t)-K_ERANGE;
             else if (copy_to_user((void *)regs->ebx, cwd, length) < 0)
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
             else regs->eax = 0;
             break;
         }
@@ -245,10 +247,10 @@ void syscall_handler(interrupt_frame_t *regs)
             char path[TASK_IMAGE_PATH_BYTES];
 
             if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
             else {
                 int result = task_exec_current(path, (const char *const *)regs->ecx, regs);
-                if (result < 0) regs->eax = (uint32_t)result;
+                if (result < 0) regs->eax = (uintptr_t)result;
             }
             break;
         }
@@ -257,9 +259,9 @@ void syscall_handler(interrupt_frame_t *regs)
             char path[TASK_IMAGE_PATH_BYTES];
 
             if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
             else if (task_spawn_current(path, regs) < 0)
-                regs->eax = (uint32_t)-K_ENOENT;
+                regs->eax = (uintptr_t)-K_ENOENT;
             break;
         }
 
@@ -273,7 +275,7 @@ void syscall_handler(interrupt_frame_t *regs)
             break;
 
         case SYS_SBRK:
-            regs->eax = (uint32_t)sys_sbrk((intptr_t)regs->ebx);
+            regs->eax = (uintptr_t)sys_sbrk((intptr_t)regs->ebx);
             break;
 
         case SYS_YIELD:
@@ -288,23 +290,23 @@ void syscall_handler(interrupt_frame_t *regs)
             char path[256];
             if (copy_string_from_user(path, sizeof(path),
                                       (const char *)regs->ebx) < 0) {
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
             } else {
-                regs->eax = (uint32_t)fd_open(path, (int)regs->ecx);
+                regs->eax = (uintptr_t)fd_open(path, (int)regs->ecx);
             }
             break;
         }
 
         case SYS_FCNTL:
-            regs->eax = (uint32_t)fd_fcntl((int)regs->ebx, (int)regs->ecx, (int)regs->edx);
+            regs->eax = (uintptr_t)fd_fcntl((int)regs->ebx, (int)regs->ecx, (int)regs->edx);
             break;
 
         case SYS_CLOSE:
-            regs->eax = (uint32_t)fd_close((int)regs->ebx);
+            regs->eax = (uintptr_t)fd_close((int)regs->ebx);
             break;
 
         case SYS_LSEEK:
-            regs->eax = (uint32_t)fd_seek((int)regs->ebx,
+            regs->eax = (uintptr_t)fd_seek((int)regs->ebx,
                                           (int32_t)regs->ecx,
                                           (int)regs->edx);
             break;
@@ -312,39 +314,39 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_READDIR: {
             char name[EXT2_NAME_MAX + 1];
             char *user_name = (char *)regs->ecx;
-            uint32_t name_size = regs->edx;
+            size_t name_size = regs->edx;
             int result;
 
             if (name_size == 0 || name_size > sizeof(name) ||
                 !vmm_user_range_valid(user_name, name_size, true)) {
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
                 break;
             }
             result = fd_read_dir((int)regs->ebx, name, name_size);
             if (result > 0 && copy_to_user(user_name, name, kstrlen(name) + 1) < 0) {
                 result = -K_EFAULT;
             }
-            regs->eax = (uint32_t)result;
+            regs->eax = (uintptr_t)result;
             break;
         }
 
         case SYS_FORK:
-            regs->eax = (uint32_t)task_fork_current(regs);
+            regs->eax = (uintptr_t)task_fork_current(regs);
             break;
 
         case SYS_DUP:
-            regs->eax = (uint32_t)fd_dup((int)regs->ebx);
+            regs->eax = (uintptr_t)fd_dup((int)regs->ebx);
             break;
 
         case SYS_DUP2:
-            regs->eax = (uint32_t)fd_dup2((int)regs->ebx, (int)regs->ecx);
+            regs->eax = (uintptr_t)fd_dup2((int)regs->ebx, (int)regs->ecx);
             break;
 
         case SYS_PIPE: {
             int pair[2];
             int result;
             if (!vmm_user_range_valid((void *)regs->ebx, sizeof(pair), true)) {
-                regs->eax = (uint32_t)-K_EFAULT;
+                regs->eax = (uintptr_t)-K_EFAULT;
                 break;
             }
             result = fd_pipe(pair);
@@ -353,12 +355,12 @@ void syscall_handler(interrupt_frame_t *regs)
                 fd_close(pair[1]);
                 result = -K_EFAULT;
             }
-            regs->eax = (uint32_t)result;
+            regs->eax = (uintptr_t)result;
             break;
         }
 
         default:
-            regs->eax = (uint32_t)-K_ENOSYS;
+            regs->eax = (uintptr_t)-K_ENOSYS;
             break;
     }
 }

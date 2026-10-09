@@ -3,5 +3,5 @@
 #include <zenos/sysret.h>
 
 int sleep(unsigned ticks) {
-    return zenos_sysret(zenos_syscall1(SYS_SLEEP, (int)ticks));
+    return zenos_sysret(zenos_syscall1(SYS_SLEEP, (intptr_t)ticks));
 }

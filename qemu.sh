@@ -2,6 +2,11 @@
 set -e
 
 cd "$(dirname "$0")"
+case "${ZENOS_ARCH:-x86_64}" in
+    x86_64) exec sh ./qemu64.sh "$@" ;;
+    i386) ;;
+    *) printf 'Unsupported ZENOS_ARCH\n' >&2; exit 1 ;;
+esac
 qemu_host=${HOST:-$(./default-host.sh)}
 qemu_disk=disk/zenos-dev.img
 

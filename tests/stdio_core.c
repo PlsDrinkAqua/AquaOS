@@ -75,7 +75,11 @@ static int live_registers(double value, unsigned seed) {
         "mov $11, %%eax; int $0x80; dec %%edx; jnz 1b;"
         "fstpl %0; movups %%xmm7, %1"
         : "=m"(result), "=m"(restored)
-        : "m"(value), "m"(vector) : "eax", "ecx", "edx", "st", "cc", "memory");
+        : "m"(value), "m"(vector) : "eax", "ecx", "edx", "st", "cc", "memory"
+#ifdef __x86_64__
+          , "xmm7"
+#endif
+);
     return result == value && !memcmp(vector, restored, sizeof(vector));
 }
 static int context_checks(void) {

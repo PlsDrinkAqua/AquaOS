@@ -3,5 +3,5 @@
 #include <zenos/sysret.h>
 
 int mkdir(const char *path) {
-    return zenos_sysret(zenos_syscall1(SYS_MKDIR, (int)path));
+    return zenos_sysret(zenos_syscall1(SYS_MKDIR, (intptr_t)path));
 }

@@ -32,7 +32,7 @@ void interrupt_handler(interrupt_frame_t *regs)
 }
 
 void exception_handler(interrupt_frame_t *regs) {
-    uint32_t faulting_address = 0;
+    uintptr_t faulting_address = 0;
     bool from_user;
 
     if (!regs) {
@@ -47,10 +47,10 @@ void exception_handler(interrupt_frame_t *regs) {
     }
 
     from_user = (regs->cs & 3U) == 3U;
-    kprintf("\nexception %u: eip=0x%x err=0x%x",
-            regs->int_num, regs->eip, regs->dummy_error);
+    kprintf("\nexception %u: ip=0x%lx err=0x%lx",
+            (unsigned)regs->int_num, (unsigned long)regs->eip, (unsigned long)regs->dummy_error);
     if (regs->int_num == 14) {
-        kprintf(" address=0x%x", faulting_address);
+        kprintf(" address=0x%lx", (unsigned long)faulting_address);
     }
     kprintf(" mode=%s\n", from_user ? "user" : "kernel");
 
@@ -63,10 +63,10 @@ void exception_handler(interrupt_frame_t *regs) {
             const char *reason = (regs->dummy_error & 1U) ? "protection violation" :
                                                             "page not present";
 
-            kprintf("Segmentation fault: pid=%u image=%s address=0x%x access=%s (%s)\n",
+            kprintf("Segmentation fault: pid=%u image=%s address=0x%lx access=%s (%s)\n",
                     task ? task->pid : 0,
                     task ? task->image_path : "unknown",
-                    faulting_address,
+                    (unsigned long)faulting_address,
                     access,
                     reason);
         }

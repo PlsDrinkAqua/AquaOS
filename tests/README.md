@@ -1,3 +1,15 @@
+For the native x86-64 build, see [X86-64](../docs/X86_64.md):
+
+```sh
+python3 tools/build64.py
+python3 ports/tinycc/build.py --arch x86_64
+python3 tools/iso64.py
+python3 tests/shell_smoke.py --arch x86_64 --block-size 4096 --selfhost
+```
+
+The commands below describe the retained **i386** build. The test runner defaults
+to i386 unless `--arch x86_64` is supplied.
+
 Build and run the QEMU smoke checks from the repository root:
 
 ```sh

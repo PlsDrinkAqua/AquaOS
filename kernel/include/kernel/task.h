@@ -7,8 +7,12 @@
 #include <kernel/paging.h>
 
 #define USER_STACK_BYTES (256U * 1024U)
+#ifdef __x86_64__
+#define USER_STACK_TOP UINT64_C(0x00007fffffffe000)
+#else
 #define USER_STACK_TOP 0xBFFFE000U
-#define TASK_KERNEL_STACK_BYTES 4096U
+#endif
+#define TASK_KERNEL_STACK_BYTES 16384U
 #define TASK_IMAGE_PATH_BYTES 256U
 #define TASK_MAX 16
 
@@ -26,13 +30,13 @@ typedef struct task {
     task_state_t state;
     char cwd[TASK_IMAGE_PATH_BYTES];
     char image_path[TASK_IMAGE_PATH_BYTES];
-    uint32_t entry;
-    uint32_t user_stack_top;
-    uint32_t kernel_stack_base;
-    uint32_t kernel_stack_top;
-    uint32_t heap_start;
-    uint32_t heap_brk;
-    uint32_t heap_limit;
+    uintptr_t entry;
+    uintptr_t user_stack_top;
+    uintptr_t kernel_stack_base;
+    uintptr_t kernel_stack_top;
+    uintptr_t heap_start;
+    uintptr_t heap_brk;
+    uintptr_t heap_limit;
     page_directory_t *address_space;
     uint32_t parent_pid;
     uint32_t job_id;
@@ -42,7 +46,7 @@ typedef struct task {
     uint8_t interrupt_pending;
     uint32_t waiting_for_pid;
     uint32_t wake_tick;
-    uint32_t keyboard_read_buf;
+    uintptr_t keyboard_read_buf;
     uint32_t keyboard_read_count;
     uint8_t waiting_for_keyboard;
     uint8_t wait_status_delivered;
@@ -63,7 +67,7 @@ int task_interrupt_foreground(void);
 void task_return_to_user(interrupt_frame_t *regs);
 void tasking_init(void);
 task_t *task_current(void);
-int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out);
+int task_start_init(const char *path, uintptr_t *entry_out, uintptr_t *stack_out);
 int task_exec_current(const char *path, const char *const *argv, interrupt_frame_t *regs);
 int task_spawn_current(const char *path, interrupt_frame_t *regs);
 int task_fork_current(interrupt_frame_t *regs);

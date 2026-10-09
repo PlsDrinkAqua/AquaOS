@@ -1,3 +1,8 @@
+For the native **x86-64** port, build userspace with `python3 tools/build64.py`,
+then run `python3 ports/tinycc/build.py --arch x86_64`. Its installation tree is
+`build/x86_64/root`. See [x86-64 build and ABI](../../docs/X86_64.md).
+The instructions below describe the retained i386 build.
+
 # TinyCC on ZenOS
 
 This port builds TinyCC 0.9.27 (`d348a9a51d32cece842b7885d27a411436d7887b`)

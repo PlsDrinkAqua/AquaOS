@@ -8,8 +8,9 @@
 #include "kernel/kha.h"
 
 
-#define KERNEL_HEAP_START  0xD0000000UL
-#define PAGE_SIZE       0x1000U                          // 4 KiB
+#include <kernel/layout.h>
+#define KERNEL_HEAP_START KERNEL_HEAP_BASE
+#define PAGE_SIZE       0x1000UL                          // 4 KiB
 
 #define VMM_PRESENT  (1<<0)
 #define VMM_RW       (1<<1)

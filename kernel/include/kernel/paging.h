@@ -1,3 +1,8 @@
+#ifdef __x86_64__
+#pragma once
+#include <stdint.h>
+typedef struct __attribute__((aligned(4096))) { uint64_t entries[512]; } page_directory_t;
+#else
 #ifndef PAGING_H
 #define PAGING_H
 
@@ -48,3 +53,5 @@ typedef struct __attribute__((aligned(4096))) {
 
 
 #endif // PAGING_H
+
+#endif

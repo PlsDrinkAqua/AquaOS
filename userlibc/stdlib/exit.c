@@ -7,3 +7,11 @@ void exit(int status) {
     for (;;) {
     }
 }
+
+void abort(void) { exit(134); }
+
+#include <stdio.h>
+void zenos_assert_fail(const char *expression, const char *file, int line) {
+    fprintf(stderr, "Assertion failed: %s (%s:%d)\n", expression, file, line);
+    abort();
+}

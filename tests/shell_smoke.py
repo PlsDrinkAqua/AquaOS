@@ -3,6 +3,8 @@
 import argparse
 import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 import socket
 import subprocess
@@ -12,12 +14,15 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="i386", compiler_only=False):
     tinycc = tinycc or selfhost
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
-    subprocess.run(["make", "-C", str(ROOT / "user"), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
-                   stdout=subprocess.DEVNULL)
+    user_dir = ROOT / ("build/x86_64/user" if arch == "x86_64" else "user")
+    iso = ROOT / ("build/x86_64/myos.iso" if arch == "x86_64" else "myos.iso")
+    if arch == "i386":
+        subprocess.run(["make", "-C", str(user_dir), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
+                       stdout=subprocess.DEVNULL)
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
         disk = tmp / "disk.img"
@@ -42,9 +47,10 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
         programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"]
-        commands += [f"write {ROOT / 'user' / name} /bin/{name}" for name in programs]
+        if arch == "x86_64": programs.append("abi64check")
+        commands += [f"write {user_dir / name} /bin/{name}" for name in programs]
         if tinycc:
-            tree = ROOT / "ports/tinycc/root"
+            tree = ROOT / ("build/x86_64/root" if arch == "x86_64" else "ports/tinycc/root")
             if not (tree / "usr/bin/tcc").is_file():
                 raise RuntimeError("Run python3 ports/tinycc/build.py first")
             for entry in sorted(tree.rglob("*"), key=lambda p: (len(p.parts), str(p))):
@@ -70,8 +76,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         sockpath = tmp / "qmp"
         proc = subprocess.Popen([
-            "qemu-system-i386", "-m", "128M", "-display", "none", "-serial", "none",
-            "-no-reboot", "-cdrom", str(ROOT / "myos.iso"),
+            "qemu-system-" + arch, "-m", "128M", "-display", "none", "-serial", "none",
+            "-no-reboot", "-cdrom", str(iso),
             "-drive", f"file={disk},format=raw,if=ide",
             "-qmp", f"unix:{sockpath},server=on,wait=off"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -162,6 +168,22 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             wait_for("GNU GRUB")
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
+            if arch == "x86_64": command("abi64check", "PASS: x86-64 ABI")
+            if compiler_only:
+                if not tinycc: raise ValueError("--compiler-only requires --tinycc")
+                command("cd /home/user")
+                command("tcc hello.c -o native-hello", "exited from /usr/bin/tcc with status 0", seconds=60)
+                command("./native-hello", "Hello from native TinyCC!")
+                command("tcc nativecheck.c companion.c -o nativecheck", "exited from /usr/bin/tcc with status 0", seconds=60)
+                command("./nativecheck", "native compiler checks passed")
+                if selfhost:
+                    command("cd tinycc")
+                    command("shell build.sh", "native build complete", seconds=180)
+                qmp("quit")
+                proc.wait(timeout=5)
+                subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                check_selfhost_artifacts()
+                return
             command("shell /script-ok", "exited from /bin/shell with status 0")
             command("cat /script-result", "\nfirst\nsecond\n")
             command("cat /script-copy", "\nfirst\n")
@@ -460,6 +482,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         finally:
             proc.terminate()
             proc.wait(timeout=5)
+            if os.environ.get("ZENOS_SMOKE_DISK"):
+                shutil.copy2(disk, os.environ["ZENOS_SMOKE_DISK"])
 
 
 if __name__ == "__main__":
@@ -469,5 +493,7 @@ if __name__ == "__main__":
     parser.add_argument("--scrollback-only", action="store_true", help="exercise terminal scrollback keys")
     parser.add_argument("--layout-only", action="store_true", help="exercise installed paths and shell restart")
     parser.add_argument("--selfhost", action="store_true", help="rebuild TinyCC twice inside ZenOS and test both compilers (implies --tinycc)")
+    parser.add_argument("--arch", choices=["i386", "x86_64"], default="i386")
+    parser.add_argument("--compiler-only", action="store_true")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost)
+    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only)

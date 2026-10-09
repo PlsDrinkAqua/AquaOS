@@ -53,7 +53,7 @@ void tss_install(int num, uint16_t kernel_ss, uint32_t kernel_esp);
  * Update kernel stack top used when CPU switches from ring3 to ring0.
  * Call this whenever you switch to a different process/thread.
  */
-void tss_set_kernel_stack(uint32_t kernel_esp);
+void tss_set_kernel_stack(uintptr_t kernel_esp);
 
 /*
  * Load task register (TR) with the TSS selector.

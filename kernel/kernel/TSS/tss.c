@@ -58,7 +58,7 @@ void tss_install(int num, uint16_t kernel_ss, uint32_t kernel_esp)
     tss.iomap_base = sizeof(struct tss_entry);
 }
 
-void tss_set_kernel_stack(uint32_t kernel_esp)
+void tss_set_kernel_stack(uintptr_t kernel_esp)
 {
     tss.esp0 = kernel_esp;
 }

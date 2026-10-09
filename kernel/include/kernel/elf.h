@@ -131,9 +131,9 @@ typedef struct {
 #define PF_R 0x4
 
 typedef struct {
-    uint32_t entry;       /* e_entry */
-    uint32_t heap_start;  /* 对齐后的 program_end，可给 brk 使用 */
-    uint32_t heap_end;    /* 初始等于 heap_start */
+    uintptr_t entry;       /* e_entry */
+    uintptr_t heap_start;  /* 对齐后的 program_end，可给 brk 使用 */
+    uintptr_t heap_end;    /* 初始等于 heap_start */
 } elf_load_result_t;
 
 /* 从内存中的 ELF 映像加载到当前用户地址空间 */

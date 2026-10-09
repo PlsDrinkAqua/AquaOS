@@ -3,22 +3,27 @@
 
 #include <stdint.h>
 
+/* Historical e-register names hold full native-width registers on x86-64.
+ * Keep field order synchronized with the architecture interrupt stubs. */
 typedef struct interrupt_frame {
-    uint32_t edi;
-    uint32_t esi;
-    uint32_t ebp;
-    uint32_t esp;
-    uint32_t ebx;
-    uint32_t edx;
-    uint32_t ecx;
-    uint32_t eax;
-    uint32_t int_num;
-    uint32_t dummy_error;
-    uint32_t eip;
-    uint32_t cs;
-    uint32_t eflags;
-    uint32_t useresp;
-    uint32_t ss;
+#ifdef __x86_64__
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
+#endif
+    uintptr_t edi;
+    uintptr_t esi;
+    uintptr_t ebp;
+    uintptr_t esp;
+    uintptr_t ebx;
+    uintptr_t edx;
+    uintptr_t ecx;
+    uintptr_t eax;
+    uintptr_t int_num;
+    uintptr_t dummy_error;
+    uintptr_t eip;
+    uintptr_t cs;
+    uintptr_t eflags;
+    uintptr_t useresp;
+    uintptr_t ss;
 } interrupt_frame_t;
 
 #endif

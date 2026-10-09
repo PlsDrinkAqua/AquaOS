@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stddef.h>
 #include <libk/string.h>
 #include <libk/stdio.h>
 #include <stdbool.h>
@@ -293,7 +294,7 @@ uint32_t vmm_translate(uintptr_t vaddr) {
     return (pt->pages[pt_idx].frame << 12) | offset;
 }
 
-bool vmm_user_range_valid(const void *ptr, uint32_t size, bool writable) {
+bool vmm_user_range_valid(const void *ptr, size_t size, bool writable) {
     uintptr_t start = (uintptr_t)ptr;
     uintptr_t last;
     uintptr_t page;

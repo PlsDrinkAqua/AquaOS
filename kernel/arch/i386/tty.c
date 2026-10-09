@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <kernel/layout.h>
 #include <libk/string.h>
 
 #include <kernel/tty.h>
@@ -10,7 +11,7 @@
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
-static uint16_t* const VGA_MEMORY = (uint16_t*) 0xC00B8000;
+static uint16_t* const VGA_MEMORY = (uint16_t*) (KERNEL_DIRECT_BASE + 0xB8000);
 
 static size_t terminal_row;
 static size_t terminal_column;

@@ -21,7 +21,11 @@
 #define VMM_PRESENT  (1u << 0)
 #define VMM_RW       (1u << 1)
 #define VMM_USER     (1u << 2)
+#ifdef __x86_64__
+#define USER_HEAP_LIMIT (USER_STACK_TOP - USER_STACK_BYTES - 4096UL)
+#else
 #define USER_HEAP_LIMIT 0x80000000U
+#endif
 
 static task_t task_table[TASK_MAX];
 static task_t *current_task;
@@ -32,20 +36,22 @@ static uint32_t preempt_disable_depth;
 
 extern page_directory_t boot_page_directory;
 
-#define KERNEL_VIRT_OFFSET 0xC0000000U
+#include <kernel/layout.h>
+#define KERNEL_VIRT_OFFSET KERNEL_DIRECT_BASE
 
 static uint8_t initial_fpu[512] __attribute__((aligned(16)));
 static task_t *fpu_owner;
 
 static void fpu_init(void) {
-    uint32_t a, b, c, d, cr;
+    uint32_t a, b, c, d;
+    uintptr_t cr;
     __asm__ volatile ("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
     if ((d & ((1U << 24) | (1U << 25))) != ((1U << 24) | (1U << 25))) {
         kprintf("ZenOS requires FXSR and SSE for floating-point contexts\n");
         for (;;) __asm__ volatile ("cli; hlt");
     }
     __asm__ volatile ("mov %%cr0, %0" : "=r"(cr));
-    cr = (cr & ~12U) | 34U; /* Clear EM/TS, enable MP/NE. */
+    cr = (cr & ~(uintptr_t)12) | 34U; /* Clear EM/TS, enable MP/NE. */
     __asm__ volatile ("mov %0, %%cr0" :: "r"(cr) : "memory");
     __asm__ volatile ("mov %%cr4, %0" : "=r"(cr));
     cr |= (1U << 9) | (1U << 10);
@@ -55,6 +61,12 @@ static void fpu_init(void) {
                       "xorps %%xmm2, %%xmm2; xorps %%xmm3, %%xmm3; xorps %%xmm4, %%xmm4;"
                       "xorps %%xmm5, %%xmm5; xorps %%xmm6, %%xmm6; xorps %%xmm7, %%xmm7"
                       :: "m"(mxcsr) : "memory");
+#ifdef __x86_64__
+    __asm__ volatile ("xorps %xmm8, %xmm8; xorps %xmm9, %xmm9;"
+                      "xorps %xmm10, %xmm10; xorps %xmm11, %xmm11;"
+                      "xorps %xmm12, %xmm12; xorps %xmm13, %xmm13;"
+                      "xorps %xmm14, %xmm14; xorps %xmm15, %xmm15");
+#endif
     __asm__ volatile ("fxsave %0" : "=m"(initial_fpu));
     fpu_owner = NULL;
 }
@@ -82,7 +94,7 @@ static const char *task_state_name(task_state_t state) {
     }
 }
 
-static uint32_t kernel_vaddr_to_paddr(uint32_t vaddr) {
+static uintptr_t kernel_vaddr_to_paddr(uintptr_t vaddr) {
     if (vaddr >= KERNEL_VIRT_OFFSET) {
         return vaddr - KERNEL_VIRT_OFFSET;
     }
@@ -334,7 +346,7 @@ static int task_alloc_kernel_stack(task_t *task) {
     }
 
     kmemset(stack, 0, TASK_KERNEL_STACK_BYTES);
-    task->kernel_stack_base = (uint32_t)stack;
+    task->kernel_stack_base = (uintptr_t)stack;
     task->kernel_stack_top = task->kernel_stack_base + TASK_KERNEL_STACK_BYTES;
     return 0;
 }
@@ -457,7 +469,7 @@ static int task_prepare_user_stack(task_t *task, const char *path,
         kmemset((void *)stack_page, 0, PAGE_SIZE);
     }
     unsigned argc = args ? args->count : 1;
-    uint32_t pointers[EXEC_ARG_MAX];
+    uintptr_t pointers[EXEC_ARG_MAX];
     uintptr_t sp = USER_STACK_TOP;
     for (unsigned i = 0; i < argc; i++) {
         const char *value = args ? args->values[i] : path;
@@ -467,8 +479,8 @@ static int task_prepare_user_stack(task_t *task, const char *path,
         pointers[i] = sp;
     }
     /* Entry ABI: argc, argv pointers, NULL; _start aligns before calling C. */
-    sp = (sp - (argc + 2) * sizeof(uint32_t)) & ~15U;
-    uint32_t *words = (uint32_t *)sp;
+    sp = (sp - (argc + 2) * sizeof(uintptr_t)) & ~(uintptr_t)15;
+    uintptr_t *words = (uintptr_t *)sp;
     words[0] = argc;
     for (unsigned i = 0; i < argc; i++) words[i + 1] = pointers[i];
     words[argc + 1] = 0;
@@ -559,7 +571,7 @@ task_t *task_current(void) {
     return current_task;
 }
 
-int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out) {
+int task_start_init(const char *path, uintptr_t *entry_out, uintptr_t *stack_out) {
     if (!current_task) {
         tasking_init();
     }
@@ -578,11 +590,11 @@ int task_start_init(const char *path, uint32_t *entry_out, uint32_t *stack_out) 
         *stack_out = current_task->user_stack_top;
     }
 
-    kprintf("task: pid=%u started %s entry=0x%x stack=0x%x\n",
+    kprintf("task: pid=%u started %s entry=0x%lx stack=0x%lx\n",
             current_task->pid,
             current_task->image_path,
-            current_task->entry,
-            current_task->user_stack_top);
+            (unsigned long)current_task->entry,
+            (unsigned long)current_task->user_stack_top);
 
     return 0;
 }
@@ -626,21 +638,29 @@ int task_exec_current(const char *path, const char *const *argv, interrupt_frame
     regs->eax = 0;
     current_task->state = TASK_RUNNING;
 
-    kprintf("task: pid=%u exec %s entry=0x%x\n",
+    kprintf("task: pid=%u exec %s entry=0x%lx\n",
             current_task->pid,
             current_task->image_path,
-            current_task->entry);
+            (unsigned long)current_task->entry);
 
     return 0;
 }
 
 /* Publish the child and cancellation state atomically with respect to Ctrl+C. */
 static void task_publish_child(task_t *child, task_t *parent) {
-    uint32_t flags;
+    uintptr_t flags;
+#ifdef __x86_64__
+    __asm__ volatile ("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+#else
     __asm__ volatile ("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+#endif
     child->interrupt_pending = parent->job_cancelled || parent->interrupt_pending;
     child->state = TASK_READY;
+#ifdef __x86_64__
+    __asm__ volatile ("pushq %0; popfq" :: "r"(flags) : "memory", "cc");
+#else
     __asm__ volatile ("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+#endif
 }
 
 int task_spawn_current(const char *path, interrupt_frame_t *regs) {
@@ -679,11 +699,11 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     task_publish_child(child, parent);
     regs->eax = child->pid;
 
-    kprintf("task: pid=%u spawned child pid=%u image=%s entry=0x%x\n",
+    kprintf("task: pid=%u spawned child pid=%u image=%s entry=0x%lx\n",
             parent->pid,
             child->pid,
             child->image_path,
-            child->entry);
+            (unsigned long)child->entry);
 
     return 0;
 }
@@ -751,7 +771,7 @@ int task_block_current_for_keyboard(interrupt_frame_t *regs, char *buf, uint32_t
 
     current_task->saved_regs = *regs;
     current_task->saved_regs.eax = 0;
-    current_task->keyboard_read_buf = (uint32_t)buf;
+    current_task->keyboard_read_buf = (uintptr_t)buf;
     current_task->keyboard_read_count = count;
     current_task->waiting_for_keyboard = 1;
     current_task->state = TASK_BLOCKED;
@@ -771,7 +791,7 @@ int task_complete_keyboard_read(char c) {
             if (c == 4) {
                 task->saved_regs.eax = 0;
             } else if (copy_to_user((void *)task->keyboard_read_buf, &c, 1) < 0) {
-                task->saved_regs.eax = (uint32_t)-K_EFAULT;
+                task->saved_regs.eax = (uintptr_t)-K_EFAULT;
             } else {
                 task->saved_regs.eax = 1;
             }
@@ -826,7 +846,7 @@ void task_sleep_current(uint32_t sleep_ticks, interrupt_frame_t *regs) {
     if (task_schedule(regs) < 0) {
         current_task->wake_tick = 0;
         current_task->state = TASK_RUNNING;
-        regs->eax = (uint32_t)-K_EAGAIN;
+        regs->eax = (uintptr_t)-K_EAGAIN;
     }
 }
 
@@ -848,14 +868,14 @@ void task_wait_current(uint32_t pid, interrupt_frame_t *regs) {
 
     if (!current_task || !regs || pid == 0) {
         if (regs) {
-            regs->eax = (uint32_t)-K_ECHILD;
+            regs->eax = (uintptr_t)-K_ECHILD;
         }
         return;
     }
 
     child = task_find_by_pid(pid);
     if (!child || child->parent_pid != current_task->pid) {
-        regs->eax = (uint32_t)-K_ECHILD;
+        regs->eax = (uintptr_t)-K_ECHILD;
         return;
     }
 
@@ -876,7 +896,7 @@ void task_wait_current(uint32_t pid, interrupt_frame_t *regs) {
     if (task_schedule(regs) < 0) {
         current_task->waiting_for_pid = 0;
         current_task->state = TASK_RUNNING;
-        regs->eax = (uint32_t)-K_EAGAIN;
+        regs->eax = (uintptr_t)-K_EAGAIN;
     }
 }
 
@@ -1008,12 +1028,12 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
 
 void task_dump_current(interrupt_frame_t *regs) {
     task_t *task = current_task;
-    uint32_t user_stack_base;
-    uint32_t heap_start;
-    uint32_t heap_brk;
-    uint32_t heap_limit;
-    uint32_t heap_top_vaddr;
-    uint32_t heap_top_paddr;
+    uintptr_t user_stack_base;
+    uintptr_t heap_start;
+    uintptr_t heap_brk;
+    uintptr_t heap_limit;
+    uintptr_t heap_top_vaddr;
+    uintptr_t heap_top_paddr;
 
     if (!task) {
         kprintf("taskinfo: no current task\n");
@@ -1033,31 +1053,29 @@ void task_dump_current(interrupt_frame_t *regs) {
             task->parent_pid,
             task_state_name(task->state),
             task->image_path);
-    kprintf(" entry: vaddr=0x%x paddr=0x%x\n",
-            task->entry,
-            vmm_translate(task->entry));
-    kprintf(" address_space: pd_vaddr=0x%x pd_paddr=0x%x\n",
-            (uint32_t)task->address_space,
-            kernel_vaddr_to_paddr((uint32_t)task->address_space));
-    kprintf(" user stack: base=0x%x top=0x%x current_sp=0x%x current_sp_paddr=0x%x\n",
-            user_stack_base,
-            task->user_stack_top,
-            regs ? regs->useresp : 0,
-            regs ? vmm_translate(regs->useresp) : 0);
-    kprintf(" kernel stack: base=0x%x top=0x%x esp0=0x%x\n",
-            task->kernel_stack_base,
-            task->kernel_stack_top,
-            task->kernel_stack_top);
-    kprintf(" heap: start=0x%x brk=0x%x limit=0x%x top_vaddr=0x%x top_paddr=0x%x\n",
-            heap_start,
-            heap_brk,
-            heap_limit,
-            heap_top_vaddr,
-            heap_top_paddr);
-    kprintf(" syscall frame: eip=0x%x eax=0x%x ebx=0x%x ecx=0x%x edx=0x%x\n",
-            regs ? regs->eip : 0,
-            regs ? regs->eax : 0,
-            regs ? regs->ebx : 0,
-            regs ? regs->ecx : 0,
-            regs ? regs->edx : 0);
+    kprintf(" entry: vaddr=0x%lx paddr=0x%lx\n",
+            (unsigned long)task->entry,
+            (unsigned long)vmm_translate(task->entry));
+    kprintf(" address_space: pd_vaddr=0x%lx pd_paddr=0x%lx\n",
+            (unsigned long)task->address_space,
+            (unsigned long)kernel_vaddr_to_paddr((uintptr_t)task->address_space));
+    kprintf(" user stack: base=0x%lx top=0x%lx current_sp=0x%lx current_sp_paddr=0x%lx\n",
+            (unsigned long)user_stack_base,
+            (unsigned long)task->user_stack_top,
+            (unsigned long)(regs ? regs->useresp : 0),
+            (unsigned long)(regs ? vmm_translate(regs->useresp) : 0));
+    kprintf(" kernel stack: base=0x%lx top=0x%lx sp0=0x%lx\n",
+            (unsigned long)task->kernel_stack_base,
+            (unsigned long)task->kernel_stack_top,
+            (unsigned long)task->kernel_stack_top);
+    kprintf(" heap: start=0x%lx brk=0x%lx limit=0x%lx top_vaddr=0x%lx top_paddr=0x%lx\n",
+            (unsigned long)heap_start, (unsigned long)heap_brk,
+            (unsigned long)heap_limit, (unsigned long)heap_top_vaddr,
+            (unsigned long)heap_top_paddr);
+    kprintf(" syscall frame: ip=0x%lx ax=0x%lx bx=0x%lx cx=0x%lx dx=0x%lx\n",
+            (unsigned long)(regs ? regs->eip : 0),
+            (unsigned long)(regs ? regs->eax : 0),
+            (unsigned long)(regs ? regs->ebx : 0),
+            (unsigned long)(regs ? regs->ecx : 0),
+            (unsigned long)(regs ? regs->edx : 0));
 }

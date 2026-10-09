@@ -22,13 +22,17 @@
 #define VMM_PRESENT  (1<<0)
 #define VMM_RW       (1<<1)
 #define VMM_USER     (1<<2)
-extern void jump_usermode(uint32_t entry, uint32_t user_stack_top);
+extern void jump_usermode(uintptr_t entry, uintptr_t user_stack_top);
 
 int debug = 4;
 
 void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
     terminal_initialize();
+#ifdef __x86_64__
+    kprintf("ZenOS x86-64: long mode, LP64 userspace\n");
+#else
     kprintf("Terminal Initilized\n");
+#endif
 
     kprintf("Initilizing GDT.................");
 	gdt_install();
@@ -74,8 +78,8 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 	kprintf("done \n");
 
         kprintf("Loading Init Task.................");
-        uint32_t user_entry = 0;
-        uint32_t user_stack = 0;
+        uintptr_t user_entry = 0;
+        uintptr_t user_stack = 0;
         int ret = task_start_init("/bin/shell", &user_entry, &user_stack);
         if (ret < 0) ret = task_start_init("/shell", &user_entry, &user_stack);
         if (ret < 0) {
@@ -93,7 +97,7 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 	// asm volatile ("1: jmp 1b");
 	kprintf("done \n");
     kprintf("About to enter user mode...\n");
-	kprintf("entry: 0x%x, stack: 0x%x", user_entry, user_stack);
+	kprintf("entry: 0x%lx, stack: 0x%lx", (unsigned long)user_entry, (unsigned long)user_stack);
 
 	jump_usermode(user_entry, user_stack);
 

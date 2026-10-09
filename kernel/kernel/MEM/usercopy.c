@@ -8,7 +8,7 @@
 
 int copy_from_user(void *dest, const void *user_src, size_t size) {
     if ((!dest && size != 0) ||
-        !vmm_user_range_valid(user_src, (uint32_t)size, false)) {
+        !vmm_user_range_valid(user_src, size, false)) {
         return -1;
     }
 
@@ -18,7 +18,7 @@ int copy_from_user(void *dest, const void *user_src, size_t size) {
 
 int copy_to_user(void *user_dest, const void *src, size_t size) {
     if ((!src && size != 0) ||
-        !vmm_user_range_valid(user_dest, (uint32_t)size, true)) {
+        !vmm_user_range_valid(user_dest, size, true)) {
         return -1;
     }
 

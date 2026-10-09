@@ -3,5 +3,5 @@
 #include <zenos/sysret.h>
 
 int open(const char *path, int flags, ...) {
-    return zenos_sysret(zenos_syscall3(SYS_OPEN, (int)path, flags, 0));
+    return zenos_sysret(zenos_syscall3(SYS_OPEN, (intptr_t)path, flags, 0));
 }

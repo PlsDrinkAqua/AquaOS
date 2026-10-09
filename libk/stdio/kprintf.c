@@ -51,6 +51,8 @@ int kprintf(const char* restrict format, ...) {
         }
 
         const char* format_begun_at = format++;
+        bool wide = false;
+        if (*format == 'l') { wide = true; format++; }
 
         if (*format == 'c') {
             format++;
@@ -69,24 +71,25 @@ int kprintf(const char* restrict format, ...) {
             if (!print(str, len))
                 return -1;
             written += len;
-        } else if (*format == 'd' || *format == 'u' || *format == 'x') {
+        } else if (*format == 'd' || *format == 'u' || *format == 'x' || *format == 'p') {
             char numbuf[32];
             char* s;
             unsigned long val;
             bool negative = false;
 
             if (*format == 'd') {
-                long v = va_arg(parameters, int);
+                long v = wide ? va_arg(parameters, long) : va_arg(parameters, int);
                 if (v < 0) {
                     negative = true;
-                    val = (unsigned long)(-v);
+                    val = 0UL - (unsigned long)v;
                 } else {
                     val = (unsigned long)v;
                 }
                 s = utoa(val, 10, numbuf + sizeof(numbuf));
             } else {
-                val = (unsigned long)va_arg(parameters, unsigned int);
-                s = utoa(val, (*format == 'x') ? 16 : 10, numbuf + sizeof(numbuf));
+                val = *format == 'p' ? (uintptr_t)va_arg(parameters, void *) :
+                      wide ? va_arg(parameters, unsigned long) : va_arg(parameters, unsigned int);
+                s = utoa(val, (*format == 'x' || *format == 'p') ? 16 : 10, numbuf + sizeof(numbuf));
             }
             size_t len = kstrlen(s) + (negative ? 1 : 0);
             if (maxrem < len) {
