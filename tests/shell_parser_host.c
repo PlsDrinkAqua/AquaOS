@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #define LINE_MAX 128
 #define PIPELINE_MAX 4
@@ -28,5 +29,18 @@ int main(void) {
     const char *bad[] = {"echo '", "echo \\", "echo |", "| cat", "echo >", "echo > ''", "echo > a > b", "echo && cat", "echo & cat"};
     for (unsigned i = 0; i < sizeof(bad)/sizeof(bad[0]); i++)
         assert(parse_pipeline(bad[i], s, &n) < 0);
+    assert(!setenv("ZENOS_PARSER_TEST", "hello | world", 1));
+    shell_last_status = 127;
+    assert(!parse_pipeline("echo $ZENOS_PARSER_TEST \"${ZENOS_PARSER_TEST}\" '$ZENOS_PARSER_TEST' \\$ZENOS_PARSER_TEST $?", s, &n));
+    assert(s[0].argc == 6);
+    assert(!strcmp(s[0].command + s[0].offsets[1], "hello | world"));
+    assert(!strcmp(s[0].command + s[0].offsets[2], "hello | world"));
+    assert(!strcmp(s[0].command + s[0].offsets[3], "$ZENOS_PARSER_TEST"));
+    assert(!strcmp(s[0].command + s[0].offsets[4], "$ZENOS_PARSER_TEST"));
+    assert(!strcmp(s[0].command + s[0].offsets[5], "127"));
+    char large[256]; memset(large, 'x', sizeof(large)-1); large[255] = 0;
+    assert(!setenv("ZENOS_PARSER_TEST", large, 1));
+    assert(parse_pipeline("echo $ZENOS_PARSER_TEST", s, &n) < 0);
+    assert(parse_pipeline("echo ${BROKEN", s, &n) < 0);
     puts("shell parser checks passed");
 }

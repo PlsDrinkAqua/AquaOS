@@ -32,12 +32,8 @@ def compile_file(source, extra):
 
 def build():
     OUT.mkdir(parents=True, exist_ok=True)
-    excluded = {'GDT', 'IDT', 'TSS', 'USERMODE', 'ELF'}
-    exclude_files = {'physical_memory_manager.c', 'virtual_memory_manager.c'}
-    sources = [p.relative_to(ROOT) for p in (ROOT/'kernel/kernel').rglob('*.c')
-               if not any(x in excluded for x in p.parts) and p.name not in exclude_files]
+    sources = [p.relative_to(ROOT) for p in (ROOT/'kernel/kernel').rglob('*.c')]
     sources += [p.relative_to(ROOT) for p in (ROOT/'kernel/arch/x86_64').glob('*.c')]
-    sources += [Path('kernel/arch/i386/tty.c')]
     sources += [p.relative_to(ROOT) for p in (ROOT/'libk').rglob('*.c')]
     objects = [compile_file(p, KFLAGS) for p in sources]
     objects += [compile_file(Path('kernel/arch/x86_64')/p, KFLAGS) for p in ['boot.S','interrupts.S']]

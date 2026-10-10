@@ -50,7 +50,7 @@ an existing recovery file is never overwritten. Disk errors are not journaled.
 
 The original command-based editor is available with `meinkampf --line file.c`.
 
-Build with `make -C user meinkampf` and `sh iso.sh`. Both the new kernel and editor
+Build with `sh build.sh` and `sh iso.sh`. Both the new kernel and editor
 are needed: the terminal now understands cursor positioning, line/screen erase,
 and reverse video. Existing development disks do not automatically refresh their
 installed editor. To create a separate disk containing the new editor and the
@@ -58,7 +58,7 @@ already staged compiler, run:
 
 ```sh
 python3 ports/tinycc/make_disk.py disk/zenos-editor.img
-qemu-system-i386 -m 128M -cdrom myos.iso \
+qemu-system-x86_64 -m 128M -cdrom build/x86_64/myos.iso \
     -drive file=disk/zenos-editor.img,format=raw,if=ide
 ```
 

@@ -7,13 +7,12 @@ python3 tools/iso64.py
 python3 tests/shell_smoke.py --arch x86_64 --block-size 4096 --selfhost
 ```
 
-The commands below describe the retained **i386** build. The test runner defaults
-to i386 unless `--arch x86_64` is supplied.
+The test runner supports x86-64 only and defaults to it.
 
 Build and run the QEMU smoke checks from the repository root:
 
 ```sh
-make -C user
+sh build.sh
 sh iso.sh
 python3 tests/shell_smoke.py
 python3 tests/shell_smoke.py --block-size 4096
@@ -25,9 +24,9 @@ The test creates and removes its own ext2 disk. It does not modify your existing
 disk images. It requires the cross compiler, GRUB build tools, QEMU, and
 `mkfs.ext2`/`debugfs`.
 
-User programs now link `userlibc/crt0.o` and implement `int main(void)` or
+User programs link `build/x86_64/obj/userlibc/arch/x86_64/crt0.o` and implement `int main(void)` or
 `int main(int argc, char **argv)`. Returning from main calls exit with that status.
-The initial i386 stack contains argc, argv pointers, and a NULL terminator.
+The initial x86-64 stack contains argc, argv pointers, NULL, environment pointers, and NULL.
 The startup routine aligns the stack before calling C.
 
 `exec(path, argv)` accepts up to 32 arguments and 1024 total bytes of argument
@@ -127,14 +126,14 @@ e2fsck and debugfs checks validate disk consistency, retained contents, and
 the absence of deleted paths. Both 1 KiB and 4 KiB ext2 blocks are supported
 by this test setup.
 
-`make -C user` builds the new commands, and `disk_test.sh` includes them when
+`sh build.sh` builds the new commands, and `tools/disk64.py` includes them when
 creating a fresh disk. The smoke runner does not update existing disk images.
 
 Memory reliability checks:
 
 ```sh
 sh tests/allocator_host.sh
-make -C user
+sh build.sh
 sh iso.sh
 python3 tests/shell_smoke.py
 ```
@@ -143,11 +142,11 @@ The host test compiles the real kernel and user allocators against bounded
 backing storage. It checks overflow rejection, adjacent-block reuse without
 heap growth, live-allocation contents, exhaustion/recovery, and preservation of
 memory reserved directly through sbrk. It requires a host C compiler (`cc`).
-The native host test supplements the i386 QEMU tests; it does not emulate
+The native host test supplements the x86-64 QEMU tests; it does not emulate
 paging or scheduling.
 
 The smoke runner also builds and runs the test-only `/memcheck`. It verifies
-8-byte malloc alignment, allocation overflow, repeated allocation/free cycles,
+16-byte malloc alignment, allocation overflow, repeated allocation/free cycles,
 sbrk bounds (including INTPTR_MIN), zero-filled newly mapped heap pages, and
 rollback after requests exceed available physical memory. Forty fork/wait
 cycles include intentional user protection faults and repeated descriptor
@@ -240,10 +239,10 @@ conversions do not clear errno. These functions require valid string pointers.
 Run `sh tests/libc_host.sh` for memory/string/conversion/sorting checks and
 `sh tests/allocator_host.sh` for allocator/realloc checks (including real backing
 storage exhaustion). The QEMU smoke runner builds the test-only `/libccheck`
-and verifies the actual i386 long/unsigned-long limits, 64-bit conversions,
+and verifies the actual LP64 long/unsigned-long limits, 64-bit conversions,
 sorting, and realloc before the existing memory and filesystem regressions.
 The stdio and floating-point additions are described below. The native TinyCC
-port now also supplies i386 setjmp/longjmp and installed compiler headers.
+port now also supplies x86-64 setjmp/longjmp and installed compiler headers.
 
 The stdio layer now provides opaque `FILE` streams with `stdin`, `stdout`, and
 `stderr`; `fopen`/`fdopen`/`fclose`; `fread`/`fwrite`; `fseek`/`ftell`/`rewind`;
@@ -330,7 +329,7 @@ ELF images overlapping that reserved region are rejected.
 
 Run `python3 tests/stdio_host.py` for comparisons against host snprintf and
 stream tests using real host descriptors, short-transfer adapters and injected
-read/write/close errors. The QEMU `/stdiocheck` verifies the i386 varargs ABI,
+read/write/close errors. The QEMU `/stdiocheck` verifies the x86-64 varargs ABI,
 64-bit formatting, file modes and contents, fdopen ownership/append flags,
 EOF/pushback/seek behavior, pipes, broken-pipe errors, and stream exhaustion.
 The regular shell smoke runner builds and runs it automatically.
@@ -345,13 +344,13 @@ of rounding controls, and exec reset to the default floating-point environment.
 Native TinyCC milestone:
 
 ```sh
+sh build.sh
 python3 ports/tinycc/build.py
-make -C user
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --tinycc
 ```
 
-The optional native compiler checks install the staged `ports/tinycc/root` tree
+The optional native compiler checks install the staged `build/x86_64/root` tree
 on the disposable disk. They compile and execute a greeting, multi-file and
 object-file programs; verify varargs, 64-bit arithmetic, floating-point parsing
 and formatting, and setjmp/longjmp (including longjmp's zero-to-one rule); then
@@ -361,7 +360,7 @@ image is required because the runtime archives exceed 1 KiB-block file limits.
 
 `python3 ports/tinycc/make_disk.py` creates a separate development
 disk at `disk/zenos-dev.img` with `/usr/bin/tcc`, headers, libraries and `/home/user/hello.c`; boot
-it together with `myos.iso`. It never overwrites an existing disk. See
+it together with `build/x86_64/myos.iso`. It never overwrites an existing disk. See
 `ports/tinycc/README.md` for the boot command, implementation details and limits.
 
 Ctrl+C foreground interruption:
@@ -395,8 +394,8 @@ with `python3 ports/tinycc/make_disk.py disk/zenos-ctrlc.img`.
 Native compiler self-rebuilding:
 
 ```sh
+sh build.sh
 python3 ports/tinycc/build.py
-make -C user
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --selfhost
 ```
@@ -422,3 +421,8 @@ cc -Wall -Wextra -Werror -fsanitize=address,undefined tests/shell_parser_host.c 
 
 The QEMU shell suite also checks quoting, escaped spaces, quoted redirection
 paths, quoted `cd`, and malformed syntax rejection before earlier commands run.
+
+Environment checks in the QEMU suite cover export/unset, quoted and braced
+expansion, child-shell isolation, and previous exit status. `/libccheck` also
+checks libc environment mutation, fork/exec/spawn inheritance, invalid envp,
+and oversized environment rejection.

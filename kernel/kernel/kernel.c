@@ -28,11 +28,7 @@ int debug = 4;
 
 void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
     terminal_initialize();
-#ifdef __x86_64__
     kprintf("ZenOS x86-64: long mode, LP64 userspace\n");
-#else
-    kprintf("Terminal Initilized\n");
-#endif
 
     kprintf("Initilizing GDT.................");
 	gdt_install();

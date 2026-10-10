@@ -7,11 +7,7 @@
 #include <kernel/paging.h>
 
 #define USER_STACK_BYTES (256U * 1024U)
-#ifdef __x86_64__
 #define USER_STACK_TOP UINT64_C(0x00007fffffffe000)
-#else
-#define USER_STACK_TOP 0xBFFFE000U
-#endif
 #define TASK_KERNEL_STACK_BYTES 16384U
 #define TASK_IMAGE_PATH_BYTES 256U
 #define TASK_MAX 16
@@ -68,7 +64,7 @@ void task_return_to_user(interrupt_frame_t *regs);
 void tasking_init(void);
 task_t *task_current(void);
 int task_start_init(const char *path, uintptr_t *entry_out, uintptr_t *stack_out);
-int task_exec_current(const char *path, const char *const *argv, interrupt_frame_t *regs);
+int task_exec_current(const char *path, const char *const *argv, const char *const *envp, interrupt_frame_t *regs);
 int task_spawn_current(const char *path, interrupt_frame_t *regs);
 int task_fork_current(interrupt_frame_t *regs);
 void task_yield_current(interrupt_frame_t *regs);

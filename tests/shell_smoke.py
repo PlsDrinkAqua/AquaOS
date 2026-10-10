@@ -14,15 +14,12 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="i386", compiler_only=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False):
     tinycc = tinycc or selfhost
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
-    user_dir = ROOT / ("build/x86_64/user" if arch == "x86_64" else "user")
-    iso = ROOT / ("build/x86_64/myos.iso" if arch == "x86_64" else "myos.iso")
-    if arch == "i386":
-        subprocess.run(["make", "-C", str(user_dir), "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"], check=True,
-                       stdout=subprocess.DEVNULL)
+    user_dir = ROOT / "build/x86_64/user"
+    iso = ROOT / "build/x86_64/myos.iso"
     with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
         tmp = Path(tmp)
         disk = tmp / "disk.img"
@@ -50,13 +47,15 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         if arch == "x86_64": programs.append("abi64check")
         commands += [f"write {user_dir / name} /bin/{name}" for name in programs]
         if tinycc:
-            tree = ROOT / ("build/x86_64/root" if arch == "x86_64" else "ports/tinycc/root")
+            tree = ROOT / "build/x86_64/root"
             if not (tree / "usr/bin/tcc").is_file():
                 raise RuntimeError("Run python3 ports/tinycc/build.py first")
             for entry in sorted(tree.rglob("*"), key=lambda p: (len(p.parts), str(p))):
                 target = "/" + entry.relative_to(tree).as_posix()
                 commands.append(f"mkdir {target}" if entry.is_dir() else f'write "{entry}" "{target}"')
         scripts = {
+            "script-env": 'echo "$PROJECT"\nexport PROJECT="child project"\necho "$PROJECT"\n',
+
             "script-ok": "# comment\n\n  cd /subdir\n\techo first > /script-result # inline\ncat /script-result | cat > /script-copy\necho second >> /script-result && echo chain works\necho hash#word\npwd",
             "script-fail": "cat /missing-script-input\necho wrong > /script-unwanted\n",
             "script-cd": "cd /missing-script-dir && echo wrong > /script-unwanted\necho wrong > /script-unwanted\n",
@@ -126,16 +125,19 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             keys = {"\t": "tab", " ": "spc", "/": "slash", ".": "dot", "-": "minus",
                     "\x80": "up", "\x81": "down", "\x82": "left", "\x83": "right",
                     "\x84": "home", "\x85": "end", "\x86": "delete", "\b": "backspace",
-                    "&": "shift-7", "#": "shift-3", "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash", '"': "shift-apostrophe", "'": "apostrophe", chr(92): "backslash"}
+                    "&": "shift-7", "#": "shift-3", "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash", '"': "shift-apostrophe", "'": "apostrophe", chr(92): "backslash", "$": "shift-4", "{": "shift-bracket_left", "}": "shift-bracket_right", ":": "shift-semicolon", "=": "equal", "?": "shift-slash", "_": "shift-minus"}
 
-            def command(text, expected=None, seconds=12):
-                qmp("human-monitor-command", {"command-line": "sendkey ret"})
-                time.sleep(.1)
-                for char in "clear":
-                    qmp("human-monitor-command", {"command-line": f"sendkey {char} 10"})
-                    time.sleep(.025)
-                qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
-                time.sleep(.15)
+            keys.update({chr(c): "shift-" + chr(c).lower() for c in range(ord("A"), ord("Z") + 1)})
+
+            def command(text, expected=None, seconds=12, clear_screen=True):
+                if clear_screen:
+                    qmp("human-monitor-command", {"command-line": "sendkey ret"})
+                    time.sleep(.1)
+                    for char in "clear":
+                        qmp("human-monitor-command", {"command-line": f"sendkey {char} 10"})
+                        time.sleep(.025)
+                    qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
+                    time.sleep(.15)
                 for char in text:
                     qmp("human-monitor-command", {"command-line": f"sendkey {keys.get(char, char)} 10"})
                     time.sleep(.025)
@@ -194,6 +196,21 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("shell /" + name, "exited from /bin/shell with status " + str(status))
             command("shell /script-crlf", "\ncrlf works\n")
             command("echo interactive && echo chain works", "\nchain works\n")
+            command('export PROJECT="parent project"')
+            command('echo "$PROJECT"', "\nparent project\n")
+            command("echo '${PROJECT}'", "\n${PROJECT}\n")
+            command('echo ${PROJECT}', "\nparent project\n")
+            command('shell /script-env', "\nchild project\n")
+            command('echo "$PROJECT"', "\nparent project\n")
+            command('unset PROJECT')
+            command('echo "unset:$PROJECT:end"', "\nunset::end\n")
+            command('cat /missing-status-file')
+            command('echo $?', "\n1\n", clear_screen=False)
+            command('echo "$?"', "\n0\n")
+            command("echo '$?'", "\n$?\n")
+            command('echo ok && echo $?', "\n0\n")
+            if layout_only: command("/bin/libccheck", "libc core checks passed")
+
             command('echo "hello | world"', "\nhello | world\n")
             command("echo 'hash # and && text'", "\nhash # and && text\n")
             command(r"echo hello\ world", "\nhello world\n")
@@ -255,7 +272,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             command("cd ..")
             if layout_only:
                 command("exit", "shell at")
-                listing = command("ls /", "\nbin/\n")
+                listing = command("ls /", "tabcheck/\n")
+                command("ls /bin", "shell\n")
                 assert "\ncat\n" not in listing and "\nshell\n" not in listing
                 command("echo lookup works", "\nlookup works\n")
                 command("/bin/cat /hello.txt", "hello, ZenOS")
@@ -272,6 +290,10 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 qmp("quit")
                 proc.wait(timeout=5)
                 subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                for path in ("/shell", "/cat"):
+                    result = subprocess.run(["debugfs", "-R", "stat " + path, str(disk)],
+                                            capture_output=True, text=True, check=True)
+                    assert "Inode:" not in result.stdout, "Legacy root executable: " + path
                 check_selfhost_artifacts()
                 print("PASS: filesystem layout, shell restart and command lookup", flush=True)
                 return
@@ -505,7 +527,7 @@ if __name__ == "__main__":
     parser.add_argument("--scrollback-only", action="store_true", help="exercise terminal scrollback keys")
     parser.add_argument("--layout-only", action="store_true", help="exercise installed paths and shell restart")
     parser.add_argument("--selfhost", action="store_true", help="rebuild TinyCC twice inside ZenOS and test both compilers (implies --tinycc)")
-    parser.add_argument("--arch", choices=["i386", "x86_64"], default="i386")
+    parser.add_argument("--arch", choices=["x86_64"], default="x86_64")
     parser.add_argument("--compiler-only", action="store_true")
     args = parser.parse_args()
     run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only)

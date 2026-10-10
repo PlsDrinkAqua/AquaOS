@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+char *getenv(const char *name);
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
+
 void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
 float strtof(const char *text, char **end);

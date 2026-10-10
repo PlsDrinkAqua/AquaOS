@@ -64,11 +64,7 @@ int main(void) {
         if (!pid) {
             /* A user protection fault must kill only this child. */
             if (i % 10 == 0) {
-                #ifdef __x86_64__
                 *(volatile unsigned *)UINT64_C(0xffffffff80000000) = 1;
-#else
-                *(volatile unsigned *)0xc0000000U = 1;
-#endif
                 exit(1);
             }
             unsigned char *p = malloc(16384); CHECK(p);

@@ -21,11 +21,7 @@
 #define VMM_PRESENT  (1u << 0)
 #define VMM_RW       (1u << 1)
 #define VMM_USER     (1u << 2)
-#ifdef __x86_64__
 #define USER_HEAP_LIMIT (USER_STACK_TOP - USER_STACK_BYTES - 4096UL)
-#else
-#define USER_HEAP_LIMIT 0x80000000U
-#endif
 
 static task_t task_table[TASK_MAX];
 static task_t *current_task;
@@ -61,12 +57,10 @@ static void fpu_init(void) {
                       "xorps %%xmm2, %%xmm2; xorps %%xmm3, %%xmm3; xorps %%xmm4, %%xmm4;"
                       "xorps %%xmm5, %%xmm5; xorps %%xmm6, %%xmm6; xorps %%xmm7, %%xmm7"
                       :: "m"(mxcsr) : "memory");
-#ifdef __x86_64__
     __asm__ volatile ("xorps %xmm8, %xmm8; xorps %xmm9, %xmm9;"
                       "xorps %xmm10, %xmm10; xorps %xmm11, %xmm11;"
                       "xorps %xmm12, %xmm12; xorps %xmm13, %xmm13;"
                       "xorps %xmm14, %xmm14; xorps %xmm15, %xmm15");
-#endif
     __asm__ volatile ("fxsave %0" : "=m"(initial_fpu));
     fpu_owner = NULL;
 }
@@ -452,7 +446,7 @@ static int task_copy_args(exec_args_t *args, const char *const *argv) {
 }
 
 static int task_prepare_user_stack(task_t *task, const char *path,
-                                   const exec_args_t *args) {
+                                   const exec_args_t *args, const exec_args_t *env) {
     /* Reject an ELF image overlapping the stack or its guard page. */
     for (uintptr_t page = USER_STACK_TOP - USER_STACK_BYTES - PAGE_SIZE;
          page < USER_STACK_TOP; page += PAGE_SIZE) {
@@ -478,18 +472,28 @@ static int task_prepare_user_stack(task_t *task, const char *path,
         kmemcpy((void *)sp, value, length);
         pointers[i] = sp;
     }
-    /* Entry ABI: argc, argv pointers, NULL; _start aligns before calling C. */
-    sp = (sp - (argc + 2) * sizeof(uintptr_t)) & ~(uintptr_t)15;
+    unsigned envc = env ? env->count : 0;
+    uintptr_t envp[EXEC_ARG_MAX];
+    for (unsigned i = 0; i < envc; i++) {
+        size_t length = kstrlen(env->values[i]) + 1;
+        sp -= length;
+        kmemcpy((void *)sp, env->values[i], length);
+        envp[i] = sp;
+    }
+    /* Entry ABI: argc, argv, NULL, envp, NULL. */
+    sp = (sp - (argc + envc + 3) * sizeof(uintptr_t)) & ~(uintptr_t)15;
     uintptr_t *words = (uintptr_t *)sp;
     words[0] = argc;
     for (unsigned i = 0; i < argc; i++) words[i + 1] = pointers[i];
     words[argc + 1] = 0;
+    for (unsigned i = 0; i < envc; i++) words[argc + 2 + i] = envp[i];
+    words[argc + 2 + envc] = 0;
     task->user_stack_top = sp;
     return 0;
 }
 
 static int task_load_image_into_space(task_t *task, const char *path, page_directory_t *pd,
-                                      const exec_args_t *args) {
+                                      const exec_args_t *args, const exec_args_t *env) {
     elf_load_result_t res;
     char image_path[sizeof(task->image_path)];
     page_directory_t *old_pd;
@@ -508,7 +512,7 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
 
     old_pd = vmm_current_address_space();
     vmm_switch_address_space(pd);
-    if (task_prepare_user_stack(task, image_path, args) < 0) {
+    if (task_prepare_user_stack(task, image_path, args, env) < 0) {
         vmm_switch_address_space(old_pd);
         task_preemption_enable();
         return -1;
@@ -527,7 +531,7 @@ static int task_load_image_into_space(task_t *task, const char *path, page_direc
     return 0;
 }
 
-static int task_create_and_load_image(task_t *task, const char *path) {
+static int task_create_and_load_image(task_t *task, const char *path, const exec_args_t *env) {
     page_directory_t *pd;
 
     if (!task || !path) {
@@ -544,7 +548,7 @@ static int task_create_and_load_image(task_t *task, const char *path) {
         return -1;
     }
 
-    if (task_load_image_into_space(task, path, pd, NULL) < 0) {
+    if (task_load_image_into_space(task, path, pd, NULL, env) < 0) {
         vmm_destroy_address_space(pd);
         task_free_kernel_stack(task);
         return -1;
@@ -576,7 +580,7 @@ int task_start_init(const char *path, uintptr_t *entry_out, uintptr_t *stack_out
         tasking_init();
     }
 
-    if (task_create_and_load_image(current_task, path) < 0) {
+    if (task_create_and_load_image(current_task, path, NULL) < 0) {
         return -1;
     }
 
@@ -599,7 +603,7 @@ int task_start_init(const char *path, uintptr_t *entry_out, uintptr_t *stack_out
     return 0;
 }
 
-int task_exec_current(const char *path, const char *const *argv, interrupt_frame_t *regs) {
+int task_exec_current(const char *path, const char *const *argv, const char *const *envp, interrupt_frame_t *regs) {
     page_directory_t *old_pd;
     page_directory_t *new_pd;
 
@@ -607,9 +611,10 @@ int task_exec_current(const char *path, const char *const *argv, interrupt_frame
         return -1;
     }
 
-    exec_args_t *args = kmalloc(sizeof(*args));
+    exec_args_t *args = kmalloc(2 * sizeof(*args));
     if (!args) return -K_ENOMEM;
     int result = task_copy_args(args, argv);
+    if (result >= 0) result = task_copy_args(args + 1, envp);
     if (result < 0) { kfree(args); return result; }
 
     old_pd = current_task->address_space;
@@ -619,7 +624,7 @@ int task_exec_current(const char *path, const char *const *argv, interrupt_frame
         return -K_ENOMEM;
     }
 
-    result = task_load_image_into_space(current_task, path, new_pd, argv ? args : NULL);
+    result = task_load_image_into_space(current_task, path, new_pd, argv ? args : NULL, args + 1);
     kfree(args);
     if (result < 0) {
         vmm_destroy_address_space(new_pd);
@@ -649,18 +654,10 @@ int task_exec_current(const char *path, const char *const *argv, interrupt_frame
 /* Publish the child and cancellation state atomically with respect to Ctrl+C. */
 static void task_publish_child(task_t *child, task_t *parent) {
     uintptr_t flags;
-#ifdef __x86_64__
     __asm__ volatile ("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
-#else
-    __asm__ volatile ("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
-#endif
     child->interrupt_pending = parent->job_cancelled || parent->interrupt_pending;
     child->state = TASK_READY;
-#ifdef __x86_64__
     __asm__ volatile ("pushq %0; popfq" :: "r"(flags) : "memory", "cc");
-#else
-    __asm__ volatile ("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
-#endif
 }
 
 int task_spawn_current(const char *path, interrupt_frame_t *regs) {
@@ -675,10 +672,12 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     task_copy_path(image_path, sizeof(image_path), path);
 
     if (parent->job_cancelled || parent->interrupt_pending) return -K_EAGAIN;
+    exec_args_t *env = kmalloc(sizeof(*env));
+    if (!env) return -K_ENOMEM;
+    int env_result = task_copy_args(env, (const char *const *)regs->ecx);
+    if (env_result < 0) { kfree(env); return env_result; }
     child = task_alloc();
-    if (!child) {
-        return -1;
-    }
+    if (!child) { kfree(env); return -1; }
 
     parent->saved_regs = *regs;
     parent->saved_regs.eax = child->pid;
@@ -687,11 +686,13 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     child->parent_pid = parent->pid;
     child->job_id = parent->child_job_id ? parent->child_job_id : parent->job_id;
 
-    if (task_create_and_load_image(child, image_path) < 0) {
+    if (task_create_and_load_image(child, image_path, env) < 0) {
+        kfree(env);
         child->state = TASK_UNUSED;
         return -1;
     }
 
+    kfree(env);
     child->saved_regs = *regs;
     child->saved_regs.eip = child->entry;
     child->saved_regs.useresp = child->user_stack_top;
@@ -1010,8 +1011,8 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
         vmm_destroy_address_space(old_pd);
     }
 
-    if (task_create_and_load_image(exiting, "/bin/shell") < 0 &&
-        task_create_and_load_image(exiting, "/shell") < 0) {
+    if (task_create_and_load_image(exiting, "/bin/shell", NULL) < 0 &&
+        task_create_and_load_image(exiting, "/shell", NULL) < 0) {
         kprintf("task: failed to restart /bin/shell\n");
         for (;;) {
             __asm__ volatile ("hlt");

@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../kernel/arch/i386/tty.c"
+#include "../kernel/kernel/TTY/tty.c"
 
 void *kmemcpy(void *restrict dst, const void *restrict src, size_t count) {
     return memcpy(dst, src, count);

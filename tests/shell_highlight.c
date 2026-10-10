@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdarg.h>
-#include "../kernel/arch/i386/tty.c"
+#include "../kernel/kernel/TTY/tty.c"
 
 void *kmemcpy(void *restrict d, const void *restrict s, size_t n) { return memcpy(d, s, n); }
 size_t kstrlen(const char *s) { return strlen(s); }

@@ -6,9 +6,7 @@
 /* Historical e-register names hold full native-width registers on x86-64.
  * Keep field order synchronized with the architecture interrupt stubs. */
 typedef struct interrupt_frame {
-#ifdef __x86_64__
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
-#endif
     uintptr_t edi;
     uintptr_t esi;
     uintptr_t ebp;

@@ -127,7 +127,10 @@ static int run_command(const char *line) {
 
     shell_stage_t stages[PIPELINE_MAX];
     int count;
-    if (parse_pipeline(line, stages, &count) < 0) return 2;
+    if (parse_pipeline(line, stages, &count) < 0) {
+        puts("shell: invalid command or expansion too long");
+        return 2;
+    }
     shell_stage_t *stage = &stages[0];
     if (count != 1 || stage->input[0] || stage->output[0]) return run_pipeline(line);
     const char *name = stage->command;
@@ -137,6 +140,32 @@ static int run_command(const char *line) {
         if (chdir(path) < 0) {
             printf("cd: cannot change directory to %s\n", path);
             return 1;
+        }
+        return 0;
+    }
+    if (strcmp(name, "export") == 0 || strcmp(name, "unset") == 0) {
+        int exporting = strcmp(name, "export") == 0;
+        if (exporting && stage->argc == 1) {
+            for (char **p = environ; p && *p; p++) puts(*p);
+            return 0;
+        }
+        /* Validate every name before changing any values. */
+        for (unsigned i = 1; i < stage->argc; i++) {
+            char *arg = stage->command + stage->offsets[i];
+            char *p = arg;
+            if (!shell_name_start(*p++)) { puts("shell: invalid variable name"); return 2; }
+            while (shell_name_char(*p)) p++;
+            if (*p && !(exporting && *p == '=')) { puts("shell: invalid variable name"); return 2; }
+        }
+        for (unsigned i = 1; i < stage->argc; i++) {
+            char *arg = stage->command + stage->offsets[i];
+            char *eq = arg;
+            while (*eq && *eq != '=') eq++;
+            const char *value = "";
+            if (*eq) { *eq = 0; value = eq + 1; }
+            else if (getenv(arg)) value = getenv(arg);
+            int result = exporting ? setenv(arg, value, 1) : unsetenv(arg);
+            if (result < 0) { puts("shell: cannot update environment"); return 1; }
         }
         return 0;
     }
@@ -177,7 +206,7 @@ static int run_command(const char *line) {
 }
 
 /* Validate the whole AND-list before executing any part of it. */
-static int run_line(char *line) {
+static int run_line_internal(char *line) {
     char *commands[LINE_MAX / 2];
     unsigned count = 0;
     char *begin = line;
@@ -193,7 +222,7 @@ static int run_line(char *line) {
         int more = kind == SH_AND;
         while (begin < end && (*begin == ' ' || *begin == '\t')) begin++;
         if (begin == end) {
-            if (!more && count == 0) return 0;
+            if (!more && count == 0) return shell_last_status;
             puts("shell: empty command in && list");
             return 2;
         }
@@ -208,11 +237,21 @@ static int run_line(char *line) {
         if (!more) break;
         begin = (char *)scan;
     }
-    int status = 0;
+    shell_expand = 1;
+    int status = shell_last_status;
     for (unsigned i = 0; i < count; i++) {
         status = run_command(commands[i]);
+        shell_last_status = status;
         if (status != 0) break;
     }
+    return status;
+}
+
+static int run_line(char *line) {
+    shell_expand = 0;
+    int status = run_line_internal(line);
+    shell_expand = 1;
+    shell_last_status = status;
     return status;
 }
 

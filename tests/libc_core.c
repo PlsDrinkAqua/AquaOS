@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef HOST_TEST
+#include <unistd.h>
+#endif
 
 #ifdef HOST_TEST
 int errno;
@@ -15,6 +18,43 @@ static int compare(const void *a, const void *b) {
 }
 static int values[1024];
 int main(void) {
+#ifndef HOST_TEST
+    if (getenv("ZENOS_ENV_CHILD")) {
+        CHECK(getenv("ZENOS_ENV_VALUE") && !strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
+        CHECK(setenv("ZENOS_ENV_VALUE", "child value", 1) == 0);
+        CHECK(unsetenv("ZENOS_ENV_CHILD") == 0);
+        return 0;
+    }
+    CHECK(setenv("ZENOS_ENV_VALUE", "inherited value", 1) == 0);
+    CHECK(setenv("ZENOS_ENV_VALUE", "ignored", 0) == 0);
+    CHECK(!strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
+    CHECK(setenv("ZENOS_ENV_CHILD", "1", 1) == 0);
+    int child = fork(); CHECK(child >= 0);
+    if (!child) {
+        const char *args[] = {"/bin/libccheck", NULL};
+        exec("/bin/libccheck", args);
+        exit(99);
+    }
+    CHECK(wait(child) == 0);
+    CHECK(!strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
+    child = spawn("/bin/libccheck"); CHECK(child > 0);
+    CHECK(wait(child) == 0);
+    CHECK(!strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
+    CHECK(unsetenv("ZENOS_ENV_CHILD") == 0);
+    CHECK(unsetenv("ZENOS_ENV_VALUE") == 0);
+    CHECK(getenv("ZENOS_ENV_VALUE") == NULL);
+    CHECK(setenv("ZENOS_ENV_EMPTY", "", 1) == 0);
+    CHECK(getenv("ZENOS_ENV_EMPTY") && !*getenv("ZENOS_ENV_EMPTY"));
+    CHECK(unsetenv("ZENOS_ENV_EMPTY") == 0);
+    const char *exec_args[] = {"/bin/libccheck", NULL};
+    errno = 0;
+    CHECK(execve("/bin/libccheck", exec_args, (const char *const *)(uintptr_t)-1) == -1 && errno == EFAULT);
+    char oversized[1025]; memset(oversized, 'x', sizeof(oversized) - 1); oversized[1024] = 0;
+    const char *big_env[] = {oversized, NULL};
+    errno = 0; CHECK(execve("/bin/libccheck", exec_args, big_env) == -1 && errno == E2BIG);
+
+    errno = 0; CHECK(setenv("bad=name", "x", 1) == -1 && errno == EINVAL);
+#endif
     char buf[32];
     CHECK(memset(buf, 0x141, 4) == buf && buf[3] == 'A');
     CHECK(memcpy(buf, "abcdef", 7) == buf);

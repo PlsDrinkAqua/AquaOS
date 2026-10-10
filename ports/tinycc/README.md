@@ -1,32 +1,25 @@
-For the native **x86-64** port, build userspace with `python3 tools/build64.py`,
-then run `python3 ports/tinycc/build.py --arch x86_64`. Its installation tree is
-`build/x86_64/root`. See [x86-64 build and ABI](../../docs/X86_64.md).
-The instructions below describe the retained i386 build.
-
 # TinyCC on ZenOS
 
 This port builds TinyCC 0.9.27 (`d348a9a51d32cece842b7885d27a411436d7887b`)
-with the existing i686-elf toolchain. The resulting `/usr/bin/tcc` runs on ZenOS and
-compiles/links static i386 ELF executables using ZenOS startup code and libc.
+with the existing x86-64 ELF toolchain. The resulting `/usr/bin/tcc` runs on ZenOS and
+compiles/links static x86-64 ELF executables using ZenOS startup code and libc.
 It does not use Linux syscalls. The first build downloads the pinned archive;
 subsequent builds use its SHA-256-verified cache.
 
 For normal development, run `sh qemu.sh`. Every launch rebuilds the compiler,
-user programs and kernel ISO, creates a fresh TinyCC development disk, and boots
-the new images. `disk/zenos-dev.img` is replaced only after the fresh disk passes
-its filesystem check. Files created inside the guest are discarded on the next
-launch. Stop the previous QEMU instance before launching again.
+user programs and kernel ISO, creates a fresh disk under `disk/zenos64.XXXXXX/`,
+and boots the new images. Previous disk images remain on disk. Stop the previous QEMU instance before launching again.
 Extra QEMU arguments can be passed through, for example `sh qemu.sh -s -S`.
 
 To build and test each step explicitly, from the repository root:
 
 ```sh
+sh build.sh
 python3 ports/tinycc/build.py
-make -C user
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --tinycc
 python3 ports/tinycc/make_disk.py
-qemu-system-i386 -m 128M -cdrom myos.iso \
+qemu-system-x86_64 -m 128M -cdrom build/x86_64/myos.iso \
     -drive file=disk/zenos-dev.img,format=raw,if=ide
 ```
 
@@ -34,12 +27,9 @@ The disk creator needs `mkfs.ext2`, `debugfs`, and `e2fsck`, but no root or loop
 mount. It creates a separate 100 MiB development disk and refuses to overwrite
 an existing path. Supply an alternate output filename as its argument to make
 another disk. Existing disk images are not updated by the build or smoke test.
-To move an older development disk to the organized layout, close QEMU and run
-`python3 ports/tinycc/migrate_disk.py`. It preserves the original disk as a
-backup; see [Filesystem Layout](../../docs/FILESYSTEM_LAYOUT.md).
-The host build needs Python 3.12+, the cross compiler, and make; boot/testing
-also needs QEMU and the usual GRUB ISO build dependencies. `ZENOS_CC` and
-`ZENOS_AR` can override the cross compiler and archiver commands.
+The host build needs Python 3.12+ and GCC/binutils; boot/testing
+also needs QEMU and the usual GRUB ISO build dependencies. `ZENOS64_CC` and
+`ZENOS64_AR` can override the cross compiler and archiver commands.
 
 Inside ZenOS:
 
@@ -61,7 +51,7 @@ inputs can be linked. `-nostdlib` retains its normal opt-out meaning.
 
 `build.py` applies explicit, checked substitutions to a fresh pinned source
 extraction. A mismatched patch fails the build. The patched sources remain in
-`build/` for inspection. Output in `root/` contains `/usr/bin/tcc`, ZenOS headers,
+`build/x86_64/tinycc-build/` for inspection. Output in `build/x86_64/root/` contains `/usr/bin/tcc`, ZenOS headers,
 TinyCC's stdarg/stdbool/float headers, `crt0.o`, `libc.a`, `libtcc1.a`, the matching
 cross-toolchain `libgcc.a`, and example/regression sources. TinyCC's license is
 installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
@@ -69,7 +59,7 @@ installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
 The compiler links `crt0.o` automatically and defaults to static linking. Its
 support runtime handles compiler-generated operations; libgcc supplies helpers
 used by GCC-built libc. `__zenos__` is predefined, with no Linux target macro.
-ZenOS libc supplies i386 setjmp/longjmp; jumping with zero returns one, and
+ZenOS libc supplies x86-64 setjmp/longjmp; jumping with zero returns one, and
 callee-saved registers and the caller stack are restored. Ordinary C rules for
 volatile locals and the lifetime of the target stack frame apply. This is not
 signal-mask-saving sigsetjmp.
@@ -79,14 +69,14 @@ signal-mask-saving sigsetjmp.
 - The first target is compile-to-file, not `-run`, dynamic libraries, bounds
   checking, or backtraces. Shared/memory output and cross-target
   dispatch are rejected. Native compiler self-rebuilding is tested below.
-- There is no environment or wall-clock ABI. Compiler search paths are explicit;
-  environment lookups are absent. `__DATE__` expands to `Jan  1 1970` and
+- There is no wall-clock ABI. Compiler search paths have configured defaults;
+  environment lookups use ZenOS libc. `__DATE__` expands to `Jan  1 1970` and
   `__TIME__` to `00:00:00`. `-bench` is rejected.
 - Use 4 KiB ext2 blocks: runtime archives exceed the 268 KiB file capacity of
   1 KiB images. Single-indirect file limits still apply (4,243,456 bytes at 4 KiB).
 - This uses the existing 256 KiB user stack and 64 MiB managed-memory ceiling.
   Large projects and deeply nested inputs have not been characterized.
-- Libc remains a subset: no wide I/O, full math library, locale/environment API,
+- Libc remains a subset: no wide I/O, full math library, full locale support,
   or complete POSIX compatibility. The math classification macros currently
   depend on GCC builtins; use the implemented math functions where applicable
   in TinyCC-generated programs. Header availability is not full C conformance.
@@ -105,7 +95,7 @@ The staged tree now includes the exact patched compiler sources and generated
 `config.h` at `/home/user/tinycc`, plus the existing utility source `echo.c`
 at `/home/user/echo.c`. The source directory contains upstream top-level C,
 header and definition files and COPYING; it is sufficient for the configured
-i386 single-translation-unit build, not an upstream build-system installation.
+x86-64 single-translation-unit build, not an upstream build-system installation.
 The host and native builds use the same patched inputs.
 
 Inside ZenOS, the complete compiler rebuild and test is now automated:
@@ -134,7 +124,7 @@ tcc tcc.c -o stage2
 
 The original `/usr/bin/tcc` remains installed. The native commands need no
 extra defines or include paths: `__zenos__` is predefined by tcc, `config.h`
-selects the static i386 target, and compiler headers/libraries use their
+selects the static x86-64 target, and compiler headers/libraries use their
 installed paths. Each resulting compiler still uses the installed host-built
 libc, crt0 and runtime archives. This milestone does not rebuild those libraries
 or the kernel.
@@ -142,8 +132,8 @@ or the kernel.
 To reproduce the full test on a disposable disk from the host:
 
 ```sh
+sh build.sh
 python3 ports/tinycc/build.py
-make -C user
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --selfhost
 ```

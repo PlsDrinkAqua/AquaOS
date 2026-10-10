@@ -1,12 +1,9 @@
 #!/bin/sh
-set -e
-. ./config.sh
-
-for PROJECT in $PROJECTS; do
-  (cd $PROJECT && $MAKE clean)
-done
-
-rm -rf sysroot
-rm -rf isodir
-rm -rf myos.iso
-rm -rf ext2_hda.img
+set -eu
+cd "$(dirname "$0")"
+python3 - <<'PYTHON'
+from pathlib import Path
+import shutil
+output = Path('build/x86_64')
+if output.exists(): shutil.rmtree(output)
+PYTHON

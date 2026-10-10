@@ -1,7 +1,4 @@
 #!/bin/sh
-set -e
-. ./headers.sh
-
-for PROJECT in $PROJECTS; do
-  (cd $PROJECT && DESTDIR="$SYSROOT" $MAKE install)
-done
+set -eu
+cd "$(dirname "$0")"
+exec python3 tools/build64.py

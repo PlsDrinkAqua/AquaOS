@@ -40,7 +40,7 @@
 
 /* Flags set in the ’flags’ member of the multiboot header. */
 
-/* Align all boot modules on i386 page (4KB) boundaries. */
+/* Align all boot modules on 4KB page boundaries. */
 #define MULTIBOOT_PAGE_ALIGN                    0x00000001
 
 /* Must pass memory information to OS. */

@@ -26,20 +26,8 @@ tcc hello.c -o hello
 ```
 
 `ports/tinycc/build.py` stages this layout, and `ports/tinycc/make_disk.py`
-creates a new disk without overwriting an existing one. To migrate an existing
-development disk, close QEMU, then run:
-
-```sh
-python3 ports/tinycc/build.py
-python3 ports/tinycc/migrate_disk.py disk/zenos-dev.img
-sh iso.sh
-```
-
-Migration works on a copy and checks ext2 integrity before replacing the disk.
-The original remains at `disk/zenos-dev.img.before-layout.bak`. It moves legacy
-headers, libraries, commands, and bundled example sources; updates installed
-system binaries and compiler files; and preserves example edits and unrelated
-user files. Destination conflicts abort migration without changing the original.
+creates a new x86-64 disk without overwriting an existing one.
+Legacy disk migration is no longer supported.
 
 Host source directories are separate from the installed layout: `user/` contains
 program sources, `userlibc/include/` public C headers, `libk/` the kernel C

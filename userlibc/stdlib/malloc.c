@@ -4,11 +4,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-#ifdef __x86_64__
 #define MALLOC_ALIGN 16U
-#else
-#define MALLOC_ALIGN 8U
-#endif
 #define CHUNK_SIZE   4096U
 
 typedef struct malloc_block {

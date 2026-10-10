@@ -249,7 +249,7 @@ void syscall_handler(interrupt_frame_t *regs)
             if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
                 regs->eax = (uintptr_t)-K_EFAULT;
             else {
-                int result = task_exec_current(path, (const char *const *)regs->ecx, regs);
+                int result = task_exec_current(path, (const char *const *)regs->ecx, (const char *const *)regs->edx, regs);
                 if (result < 0) regs->eax = (uintptr_t)result;
             }
             break;
@@ -260,8 +260,10 @@ void syscall_handler(interrupt_frame_t *regs)
 
             if (copy_string_from_user(path, sizeof(path), (const char *)regs->ebx) < 0)
                 regs->eax = (uintptr_t)-K_EFAULT;
-            else if (task_spawn_current(path, regs) < 0)
-                regs->eax = (uintptr_t)-K_ENOENT;
+            else {
+                int result = task_spawn_current(path, regs);
+                if (result < 0) regs->eax = (uintptr_t)result;
+            }
             break;
         }
 

@@ -38,6 +38,8 @@ int mkdir(const char *path);
 char *getcwd(char *buf, size_t size);
 off_t lseek(int fd, off_t offset, int whence);
 int readdir(int fd, char *name, size_t name_size);
+extern char **environ;
+int execve(const char *path, const char *const argv[], const char *const envp[]);
 int exec(const char *path, const char *const argv[]);
 int spawn(const char *path);
 int wait(int pid);

@@ -14,14 +14,13 @@ ROOT = HERE.parents[1]
 REV = 'd348a9a51d32cece842b7885d27a411436d7887b'
 SHA = 'f94573de2b9061473d4f40cbf9c8a8ea9ac64d9c7a4abf75b008d1401fcf3f96'
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--arch', choices=['i386', 'x86_64'], default='i386')
+parser.add_argument('--arch', choices=['x86_64'], default='x86_64')
 args = parser.parse_args()
-x64 = args.arch == 'x86_64'
 CACHE = HERE / 'cache'
-BUILD = ROOT / 'build/x86_64/tinycc-build' if x64 else HERE / 'build'
-DEST = ROOT / 'build/x86_64/root' if x64 else HERE / 'root'
-LIBC = ROOT / 'build/x86_64/libc.a' if x64 else ROOT / 'userlibc/libc.a'
-CRT = ROOT / 'build/x86_64/obj/userlibc/arch/x86_64/crt0.o' if x64 else ROOT / 'userlibc/crt0.o'
+BUILD = ROOT / 'build/x86_64/tinycc-build'
+DEST = ROOT / 'build/x86_64/root'
+LIBC = ROOT / 'build/x86_64/libc.a'
+CRT = ROOT / 'build/x86_64/obj/userlibc/arch/x86_64/crt0.o'
 CACHE.mkdir(exist_ok=True)
 archive = CACHE / 'source.tar.gz'
 if not archive.exists():
@@ -44,7 +43,6 @@ def replace(file, old, new):
 replace('tcc.h', '#include <time.h>', '')
 replace('tcc.h', '# include <sys/time.h>', '')
 replace('tcc.h', '#if defined _WIN32 == defined TCC_TARGET_PE', '#if !defined(__zenos__) && (defined _WIN32 == defined TCC_TARGET_PE)')
-replace('tcc.h', '#include <stdlib.h>', '#include <stdlib.h>\n/* No environment ABI yet: configured compiler paths are authoritative. */\nstatic inline char *getenv(const char *name) { (void)name; return NULL; }')
 replace('tcc.c', '    struct timeval tv;\n    gettimeofday(&tv, NULL);\n    return tv.tv_sec*1000 + (tv.tv_usec+500)/1000;', '    return 0; /* No compiler timing until ZenOS has a clock API. */')
 p = source / 'tccpp.c'; s = p.read_text(); a = s.index('        time_t ti;'); b = s.index('        cstrval = buf;', a)
 s = s[:a] + '        strcpy(buf, tok == TOK___DATE__ ? "Jan  1 1970" : "00:00:00");\n' + s[b:]; p.write_text(s)
@@ -56,49 +54,43 @@ replace('libtcc.c', '    s->alacarte_link = 1;', '    s->static_link = 1;\n    s
 replace('libtcc.c', '    tcc_define_symbol(s, "__STDC__", NULL);', '    tcc_define_symbol(s, "__zenos__", "1");\n    tcc_define_symbol(s, "__STDC__", NULL);')
 replace('libtcc.c', '            tcc_add_crt(s, "crt1.o");\n        tcc_add_crt(s, "crti.o");', '            tcc_add_crt(s, "crt0.o");')
 replace('tccelf.c', '        if (s1->output_type != TCC_OUTPUT_MEMORY)\n            tcc_add_crt(s1, "crtn.o");', '        tcc_add_library_err(s1, "gcc"); /* GCC-built ZenOS libc helpers. */')
-if x64:
-    # Modern GCC emits PLT32 for external calls, including static objects.
-    # Resolve locally defined symbols directly; this pinned TCC otherwise
-    # builds a dynamic PLT that its static output path never relocates.
-    replace('tccelf.c',
-            '(ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||',
-            '((s1->static_link && sym->st_shndx != SHN_UNDEF) ||\n'
-            '                 ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||')
-    # Keep relocation sections available until static GOT entries are filled.
-    # tidy_section_headers removes them from nb_sections.
-    replace('tccelf.c', '\ttidy_section_headers(s1, sec_order);', '')
-    replace('tccelf.c', '            fill_local_got_entries(s1);',
-            '            fill_local_got_entries(s1);\n'
-            '        tidy_section_headers(s1, sec_order);')
+# Modern GCC emits PLT32 for external calls, including static objects.
+# Resolve locally defined symbols directly; this pinned TCC otherwise
+# builds a dynamic PLT that its static output path never relocates.
+replace('tccelf.c',
+        '(ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||',
+        '((s1->static_link && sym->st_shndx != SHN_UNDEF) ||\n'
+        '                 ELFW(ST_VISIBILITY)(sym->st_other) != STV_DEFAULT ||')
+# Keep relocation sections available until static GOT entries are filled.
+# tidy_section_headers removes them from nb_sections.
+replace('tccelf.c', '\ttidy_section_headers(s1, sec_order);', '')
+replace('tccelf.c', '            fill_local_got_entries(s1);',
+        '            fill_local_got_entries(s1);\n'
+        '        tidy_section_headers(s1, sec_order);')
 replace('tccelf.c', '    f = fdopen(fd, "wb");', '    f = fdopen(fd, "wb");\n    if (!f) { close(fd); unlink(filename); tcc_error_noabort("cannot open output stream"); return -1; }')
 replace('tccelf.c', '    fclose(f);\n\n    return 0;', '    {\n        int failed = ferror(f);\n        if (fclose(f) < 0) failed = 1;\n        if (failed) { unlink(filename); tcc_error_noabort("output write failed"); return -1; }\n    }\n\n    return 0;')
 (source / 'config.h').write_text('''#define TCC_VERSION "0.9.27"
 #define CONFIG_TCC_STATIC 1
-#define TCC_TARGET_I386 1
+#define TCC_TARGET_X86_64 1
 #define CONFIG_TCCDIR "/usr/lib/tcc"
 #define CONFIG_TCC_SYSINCLUDEPATHS "/usr/include"
 #define CONFIG_TCC_LIBPATHS "/usr/lib"
 #define CONFIG_TCC_CRTPREFIX "/usr/lib"
 ''')
-if x64:
-    p = source / 'config.h'
-    p.write_text(p.read_text().replace('TCC_TARGET_I386', 'TCC_TARGET_X86_64'))
-cc = os.environ.get('ZENOS64_CC', 'gcc') if x64 else os.environ.get('ZENOS_CC', 'i686-elf-gcc')
-ar = os.environ.get('ZENOS64_AR', 'ar') if x64 else os.environ.get('ZENOS_AR', 'i686-elf-ar')
+cc = os.environ.get('ZENOS64_CC', 'gcc')
+ar = os.environ.get('ZENOS64_AR', 'ar')
 def run(args): subprocess.run(list(map(str, args)), check=True, cwd=ROOT)
-if not x64: run(['make', '-C', 'userlibc'])
 if not LIBC.is_file() or not CRT.is_file(): raise SystemExit('Run python3 tools/build64.py first')
 flags = ['-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-D__zenos__=1', '-I'+str(ROOT/'userlibc/include')]
-if x64:
-    compiler_headers = subprocess.check_output([cc, '-print-file-name=include'], text=True).strip()
-    flags += ['-m64', '-fno-pie', '-mno-red-zone', '-nostdinc', '-isystem', compiler_headers]
+compiler_headers = subprocess.check_output([cc, '-print-file-name=include'], text=True).strip()
+flags += ['-m64', '-fno-pie', '-mno-red-zone', '-nostdinc', '-isystem', compiler_headers]
 run([cc, *flags, '-c', source/'tcc.c', '-o', BUILD/'tcc.o'])
 if DEST.exists(): shutil.rmtree(DEST)
 (DEST/'usr/lib/tcc').mkdir(parents=True)
 (DEST/'usr/bin').mkdir(parents=True)
 (DEST/'home/user').mkdir(parents=True)
-run([cc, *(['-m64', '-no-pie'] if x64 else []), '-T', ROOT/'user/user.ld', '-o', DEST/'usr/bin/tcc', CRT, BUILD/'tcc.o', LIBC, '-nostdlib', '-lgcc', '-Wl,-s'])
-runtime = ['libtcc1.c', 'alloca86_64.S', 'alloca86_64-bt.S', 'va_list.c'] if x64 else ['libtcc1.c', 'alloca86.S', 'alloca86-bt.S']
+run([cc, '-m64', '-no-pie', '-T', ROOT/'user/user.ld', '-o', DEST/'usr/bin/tcc', CRT, BUILD/'tcc.o', LIBC, '-nostdlib', '-lgcc', '-Wl,-s'])
+runtime = ['libtcc1.c', 'alloca86_64.S', 'alloca86_64-bt.S', 'va_list.c']
 for name in runtime:
     run([cc, *flags, '-c', source/'lib'/name, '-o', BUILD/(Path(name).stem+'.o')])
 run([ar, 'rcs', DEST/'usr/lib/tcc/libtcc1.a', *[BUILD/(Path(n).stem+'.o') for n in runtime]])

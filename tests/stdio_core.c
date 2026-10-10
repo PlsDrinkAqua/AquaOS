@@ -76,9 +76,7 @@ static int live_registers(double value, unsigned seed) {
         "fstpl %0; movups %%xmm7, %1"
         : "=m"(result), "=m"(restored)
         : "m"(value), "m"(vector) : "eax", "ecx", "edx", "st", "cc", "memory"
-#ifdef __x86_64__
           , "xmm7"
-#endif
 );
     return result == value && !memcmp(vector, restored, sizeof(vector));
 }

@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
-#include "../kernel/arch/i386/tty.c"
+#include "../kernel/kernel/TTY/tty.c"
 
 void *kmemcpy(void *restrict dst, const void *restrict src, size_t n) {
     return memcpy(dst, src, n);
@@ -23,6 +23,8 @@ int main(void) {
     assert((screen[83] & 255) == ' ');
     assert((screen[1] & 255) == 'h');
     terminal_writestring("\033[999999999999999999;99999999999999H");
+    assert(terminal_row == 1 && terminal_column == 2); /* Oversized CSI is ignored. */
+    terminal_writestring("\033[999;999H");
     assert(terminal_row == 24 && terminal_column == 79);
     terminal_writestring("\033[0;0H");
     assert(terminal_row == 0 && terminal_column == 0);

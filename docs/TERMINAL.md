@@ -1,10 +1,7 @@
 # Terminal colours
 
-Run `./qemu.sh` to rebuild the compiler, user programs, kernel ISO and development
-disk, then boot the new images. Each launch replaces `disk/zenos-dev.img`, so
-files created inside the previous guest session are discarded. Stop the previous
-QEMU instance before launching again. The fresh disk includes the latest shell;
-no manual installation is needed.
+Run `sh qemu.sh` to rebuild and boot a fresh x86-64 development disk.
+Previous guest images remain under `disk/zenos64.XXXXXX/`.
 
 Interactive shell input is highlighted as you type: builtins are bright cyan,
 external commands are bright magenta, unknown commands are bright red, operators

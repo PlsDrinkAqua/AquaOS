@@ -33,7 +33,7 @@ returns 130. Interactive command failures leave the prompt available.
 
 Ctrl+C interrupts the script's current foreground command; its failed status
 then stops the script and restores the parent shell's terminal ownership.
-`exit` ends the current shell with status 0. Script arguments, variables,
+`exit` ends the current shell with status 0. Script arguments,
 loops, `||`, semicolon lists, and background jobs are not
 implemented. Builtins such as `cd` and `pwd` must be standalone commands (they
 can appear in an `&&` list), not pipeline stages or redirected commands.
@@ -52,7 +52,7 @@ and prints `native build complete` only after all commands succeed.
 Run the QEMU regression suite from the host with:
 
 ```sh
-make -C user
+sh build.sh
 python3 ports/tinycc/build.py
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --selfhost
@@ -69,11 +69,38 @@ redirection filenames, for example `echo hello > "my notes.txt"`.
 Single quotes preserve every enclosed character. Outside quotes, a backslash
 makes the next character literal, so `my\ notes.txt` is one word. Inside double
 quotes, backslash escapes double quote, backslash, dollar sign, and backtick;
-before other characters it is preserved. Variables and command substitution
-remain unimplemented, so dollar signs and backticks are literal text.
+before other characters it is preserved. Command substitution remains unimplemented; backticks are literal text.
 
 Comments and operators are recognized only outside quotes and escapes. A `#`
 starts a comment at the beginning of a word; `name#part` stays literal.
 Unclosed quotes and trailing unquoted backslashes return syntax status 2 before
 any command on the line executes. Multiline quotes and line continuation are
 not supported.
+
+## Environment variables
+
+`export NAME=value` sets a variable for this shell and the programs it launches.
+Use quotes for spaces, for example `export PROJECT="/home/user/my project"`.
+`export NAME` preserves an existing value or creates an empty value. With no
+arguments, `export` prints the environment. `unset NAME` removes a variable.
+Names use letters, digits, and underscores and cannot begin with a digit.
+Bare assignments such as `NAME=value` are not supported yet.
+
+`$NAME` and `${NAME}` expand in unquoted text and double quotes. Single quotes
+and escaped dollar signs keep them literal. Unset variables expand to empty
+text. Expanded text stays in its argument, including spaces and operators;
+field splitting, wildcard expansion, and recursive expansion are not supported.
+Expansion works in executable names, arguments, and redirection paths.
+Each expanded word and each stage's total argument storage must fit 128 bytes.
+
+`$?` expands to the previous command's exit status, initially 0. It is updated
+after each command, including each executed part of an `&&` list. Syntax errors
+set it to 2; blank lines and comments preserve it. A pipeline uses its last
+stage's status. Scripts retain their existing stop-on-failure behavior.
+
+Child processes inherit the environment; changes in a child do not affect its
+parent. Libc provides `getenv`, `setenv`, `unsetenv`, and `environ`. `exec` and
+`spawn` pass the current environment; `execve` accepts an explicit environment.
+The exec/spawn ABI accepts at most 32 environment entries and 1024 bytes of
+strings including terminators, independently of the argument limits. Larger
+environments return E2BIG. Rebuild all binaries for the updated startup ABI.
