@@ -34,7 +34,7 @@ returns 130. Interactive command failures leave the prompt available.
 Ctrl+C interrupts the script's current foreground command; its failed status
 then stops the script and restores the parent shell's terminal ownership.
 `exit` ends the current shell with status 0. Script arguments, variables,
-quoting, escapes, loops, `||`, semicolon lists, and background jobs are not
+loops, `||`, semicolon lists, and background jobs are not
 implemented. Builtins such as `cd` and `pwd` must be standalone commands (they
 can appear in an `&&` list), not pipeline stages or redirected commands.
 
@@ -57,3 +57,23 @@ python3 ports/tinycc/build.py
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --selfhost
 ```
+
+## Quoting and escapes
+
+Single and double quotes keep spaces and shell operators inside one argument:
+`cat "my notes.txt"` opens one file, and `echo 'hello | world'` prints the pipe
+literally. Adjacent quoted and unquoted pieces form one word; `a"b c"d` becomes
+`ab cd`. Empty quotes supply an empty argument. Quotes also work with `cd` and
+redirection filenames, for example `echo hello > "my notes.txt"`.
+
+Single quotes preserve every enclosed character. Outside quotes, a backslash
+makes the next character literal, so `my\ notes.txt` is one word. Inside double
+quotes, backslash escapes double quote, backslash, dollar sign, and backtick;
+before other characters it is preserved. Variables and command substitution
+remain unimplemented, so dollar signs and backticks are literal text.
+
+Comments and operators are recognized only outside quotes and escapes. A `#`
+starts a comment at the beginning of a word; `name#part` stays literal.
+Unclosed quotes and trailing unquoted backslashes return syntax status 2 before
+any command on the line executes. Multiline quotes and line continuation are
+not supported.

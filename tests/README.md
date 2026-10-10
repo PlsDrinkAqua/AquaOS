@@ -412,3 +412,13 @@ and short-circuiting, syntax rejection before execution, long-line rejection,
 failed commands and `cd`, nested failure propagation, and Ctrl+C recovery.
 `--selfhost` now uses the installed TinyCC `build.sh` to rebuild both stages
 and run native tests. See [Shell scripts](../docs/SHELL.md).
+
+Shell quoting/parser host checks (including sanitizer checks):
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined tests/shell_parser_host.c -o /tmp/zenos-shell-parser
+/tmp/zenos-shell-parser
+```
+
+The QEMU shell suite also checks quoting, escaped spaces, quoted redirection
+paths, quoted `cd`, and malformed syntax rejection before earlier commands run.

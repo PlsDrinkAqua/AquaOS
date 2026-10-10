@@ -19,6 +19,8 @@ typedef struct {
     char input[LINE_MAX];
     char output[LINE_MAX];
     int append;
+    unsigned argc;
+    unsigned offsets[32];
 } shell_stage_t;
 
 static void write_str(const char *s) {
@@ -31,81 +33,14 @@ static void write_str(const char *s) {
     write(1, s, (unsigned)(p - s));
 }
 
-static int has_shell_operator(const char *line) {
-    while (*line) {
-        if (*line == '|' || *line == '<' || *line == '>') return 1;
-        line++;
-    }
-    return 0;
-}
+#include "shell_parser.h"
 
-static void copy_trimmed(char *dest, size_t size, const char *begin, const char *end) {
-    size_t len;
-    while (begin < end && (*begin == ' ' || *begin == '\t')) begin++;
-    while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) end--;
-    len = (size_t)(end - begin);
-    if (len >= size) len = size - 1;
-    for (size_t i = 0; i < len; i++) dest[i] = begin[i];
-    dest[len] = '\0';
-}
-
-static int parse_stage(const char *begin, const char *end, shell_stage_t *stage) {
-    const char *p = begin;
-    const char *command_end = end;
-    stage->command[0] = stage->input[0] = stage->output[0] = '\0';
-    stage->append = 0;
-    while (p < end) {
-        if (*p == '<' || *p == '>') {
-            char op = *p++;
-            const char *name_begin, *name_end;
-            if (command_end == end) command_end = p - 1;
-            if (op == '>' && p < end && *p == '>') { stage->append = 1; p++; }
-            while (p < end && (*p == ' ' || *p == '\t')) p++;
-            name_begin = p;
-            while (p < end && *p != '<' && *p != '>') p++;
-            name_end = p;
-            while (name_end > name_begin && (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
-            if (name_begin == name_end) return -1;
-            if (op == '<') copy_trimmed(stage->input, sizeof(stage->input), name_begin, name_end);
-            else copy_trimmed(stage->output, sizeof(stage->output), name_begin, name_end);
-        } else p++;
-    }
-    copy_trimmed(stage->command, sizeof(stage->command), begin, command_end);
-    return stage->command[0] ? 0 : -1;
-}
-
-static int parse_pipeline(const char *line, shell_stage_t stages[], int *count) {
-    const char *start = line, *p = line;
-    int n = 0;
-    for (;;) {
-        if (*p == '|' || *p == '\0') {
-            if (n == PIPELINE_MAX || parse_stage(start, p, &stages[n]) < 0) return -1;
-            n++;
-            if (*p == '\0') break;
-            start = p + 1;
-        }
-        p++;
-    }
-    *count = n;
-    return 0;
-}
-
-/* Whitespace-separated arguments; quoting and escapes are not supported yet. */
-static void execute_stage(char *command) {
+static void execute_stage(shell_stage_t *stage) {
     const char *argv[33];
     char path[LINE_MAX];
-    unsigned argc = 0;
-    char *p = command;
-    while (*p) {
-        while (*p == ' ' || *p == '\t') p++;
-        if (!*p) break;
-        if (argc == 32) { puts("shell: too many arguments"); exit(1); }
-        argv[argc++] = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
-        if (*p) *p++ = '\0';
-    }
-    argv[argc] = NULL;
-    if (!argc) exit(0);
+    for (unsigned i = 0; i < stage->argc; i++)
+        argv[i] = stage->command + stage->offsets[i];
+    argv[stage->argc] = NULL;
     unsigned i = 0;
     const char *name = argv[0];
     int has_slash = 0;
@@ -170,7 +105,7 @@ static int run_pipeline(const char *line) {
                 dup2(fd, 1); close(fd);
             }
             for (int j = 0; j + 1 < count; j++) { close(pipes[j][0]); close(pipes[j][1]); }
-            execute_stage(stages[i].command);
+            execute_stage(&stages[i]);
             exit(0);
         }
         pids[i] = pid;
@@ -190,47 +125,50 @@ static int run_command(const char *line) {
         return 0;
     }
 
-    if (has_shell_operator(line)) {
-        return run_pipeline(line);
-    }
-
-    if (strcmp(line, "cd") == 0 || strncmp(line, "cd ", 3) == 0 || strncmp(line, "cd\t", 3) == 0) {
-        const char *path = line + 2;
-        while (*path == ' ' || *path == '\t') path++;
-        if (chdir(*path ? path : "/") < 0) {
+    shell_stage_t stages[PIPELINE_MAX];
+    int count;
+    if (parse_pipeline(line, stages, &count) < 0) return 2;
+    shell_stage_t *stage = &stages[0];
+    if (count != 1 || stage->input[0] || stage->output[0]) return run_pipeline(line);
+    const char *name = stage->command;
+    if (strcmp(name, "cd") == 0) {
+        if (stage->argc > 2) { puts("cd: too many arguments"); return 2; }
+        const char *path = stage->argc == 2 ? stage->command + stage->offsets[1] : "/";
+        if (chdir(path) < 0) {
             printf("cd: cannot change directory to %s\n", path);
             return 1;
         }
         return 0;
     }
-    if (strcmp(line, "pwd") == 0) {
+    /* Other builtins accept no arguments. */
+    if (stage->argc == 1 && strcmp(name, "pwd") == 0) {
         char path[256];
         if (getcwd(path, sizeof(path))) puts(path);
         else { puts("pwd: cannot read working directory"); return 1; }
         return 0;
     }
 
-    if (strcmp(line, "exit") == 0) {
+    if (stage->argc == 1 && strcmp(name, "exit") == 0) {
         exit(0);
     }
 
-    if (strcmp(line, "help") == 0) {
+    if (stage->argc == 1 && strcmp(name, "help") == 0) {
         puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, meinkampf, cd, pwd, taskinfo, exit");
         puts("Use exit or Ctrl+D to leave the shell; Ctrl+D ends cat input.");
         return 0;
     }
 
-    if (strcmp(line, "clear") == 0) {
+    if (stage->argc == 1 && strcmp(name, "clear") == 0) {
         zenos_terminal_clear();
         return 0;
     }
 
-    if (strcmp(line, "about") == 0) {
+    if (stage->argc == 1 && strcmp(name, "about") == 0) {
         puts("AquaOS userland shell");
         return 0;
     }
 
-    if (strcmp(line, "taskinfo") == 0) {
+    if (stage->argc == 1 && strcmp(name, "taskinfo") == 0) {
         zenos_taskinfo();
         return 0;
     }
@@ -242,39 +180,33 @@ static int run_command(const char *line) {
 static int run_line(char *line) {
     char *commands[LINE_MAX / 2];
     unsigned count = 0;
-    for (char *p = line; *p; p++) {
-        if (*p == '#' && (p == line || p[-1] == ' ' || p[-1] == '\t')) {
-            *p = '\0';
-            break;
-        }
-    }
     char *begin = line;
-    for (char *p = line;; p++) {
-        if (*p != '&' && *p) continue;
-        int more = *p != '\0';
-        if (more && p[1] != '&') { puts("shell: expected &&"); return 2; }
-        char *end = p;
+    const char *scan = line;
+    char word[LINE_MAX];
+    for (;;) {
+        const char *token_start = scan;
+        while (*token_start == ' ' || *token_start == '\t') token_start++;
+        int kind = shell_token(&scan, word);
+        if (kind < 0) { puts("shell: invalid quoting, escape, or operator"); return 2; }
+        if (kind != SH_AND && kind != SH_END) continue;
+        char *end = (char *)token_start;
+        int more = kind == SH_AND;
         while (begin < end && (*begin == ' ' || *begin == '\t')) begin++;
-        while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) end--;
         if (begin == end) {
             if (!more && count == 0) return 0;
             puts("shell: empty command in && list");
             return 2;
         }
         *end = '\0';
-        /* Check pipelines even in portions that might be skipped. */
-        if (has_shell_operator(begin)) {
-            shell_stage_t stages[PIPELINE_MAX];
-            int stages_count;
-            if (parse_pipeline(begin, stages, &stages_count) < 0) {
-                puts("shell: invalid pipeline or redirection");
-                return 2;
-            }
+        shell_stage_t stages[PIPELINE_MAX];
+        int stages_count;
+        if (parse_pipeline(begin, stages, &stages_count) < 0) {
+            puts("shell: invalid pipeline or redirection");
+            return 2;
         }
         commands[count++] = begin;
         if (!more) break;
-        p++;
-        begin = p + 1;
+        begin = (char *)scan;
     }
     int status = 0;
     for (unsigned i = 0; i < count; i++) {

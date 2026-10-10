@@ -126,7 +126,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             keys = {"\t": "tab", " ": "spc", "/": "slash", ".": "dot", "-": "minus",
                     "\x80": "up", "\x81": "down", "\x82": "left", "\x83": "right",
                     "\x84": "home", "\x85": "end", "\x86": "delete", "\b": "backspace",
-                    "&": "shift-7", "#": "shift-3", "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash"}
+                    "&": "shift-7", "#": "shift-3", "<": "shift-comma", ">": "shift-dot", "|": "shift-backslash", '"': "shift-apostrophe", "'": "apostrophe", chr(92): "backslash"}
 
             def command(text, expected=None, seconds=12):
                 qmp("human-monitor-command", {"command-line": "sendkey ret"})
@@ -194,6 +194,18 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("shell /" + name, "exited from /bin/shell with status " + str(status))
             command("shell /script-crlf", "\ncrlf works\n")
             command("echo interactive && echo chain works", "\nchain works\n")
+            command('echo "hello | world"', "\nhello | world\n")
+            command("echo 'hash # and && text'", "\nhash # and && text\n")
+            command(r"echo hello\ world", "\nhello world\n")
+            command('echo a"b c"d "" tail', "\nab cd  tail\n")
+            command('echo "quoted file" > "/quote file"')
+            command('cat "/quote file" | cat', "\nquoted file\n")
+            command('mkdir "/quote dir"')
+            command('cd "/quote dir" && pwd', "\n/quote dir\n")
+            command('cd /')
+            command('echo wrong > /script-unwanted && echo "unterminated', "shell: invalid quoting")
+            command("echo wrong > /script-unwanted && echo trailing" + chr(92), "shell: invalid quoting")
+
             command("cat /missing-script-input && echo wrong > /script-unwanted")
             command("echo wrong > /script-unwanted &&", "shell: empty command")
             command("cat /script-unwanted", "exited from /bin/cat with status 1")
