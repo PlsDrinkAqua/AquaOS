@@ -9,6 +9,11 @@ python3 tests/shell_smoke.py --arch x86_64 --block-size 4096 --selfhost
 
 The test runner supports x86-64 only and defaults to it.
 
+`python3 tests/file_ops_host.py` checks cp/mv with sanitizers and injected I/O
+failures. `python3 tests/shell_smoke.py --block-size 4096 --file-ops-only` runs
+their QEMU and offline persistence/integrity checks. These command checks also
+run in the full shell suite. See [file commands](../docs/FILE_COMMANDS.md).
+
 Build and run the QEMU smoke checks from the repository root:
 
 ```sh

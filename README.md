@@ -20,3 +20,7 @@ See [build requirements and architecture](docs/X86_64.md),
 `kilo <file>` opens the lightweight editor with C/C++ syntax highlighting and
 search. Ctrl+S saves, Ctrl+F searches, and Ctrl+Q quits. See the
 [Kilo port](ports/kilo/README.md) for controls and verification.
+
+`cp <source> <destination>` copies files and `mv <source> <destination>` moves
+or renames them. Both accept destination directories and multiple source files.
+See [file commands](docs/FILE_COMMANDS.md) for behavior and limits.

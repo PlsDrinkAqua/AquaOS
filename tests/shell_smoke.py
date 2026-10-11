@@ -14,7 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False, kilo_only=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False, kilo_only=False, file_ops_only=False):
     tinycc = tinycc or selfhost
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
@@ -48,7 +48,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "kilo", "libccheck", "stdiocheck", "intcheck"]
+        programs = ["shell", "hello", "cat", "cp", "mv", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "kilo", "libccheck", "stdiocheck", "intcheck"]
         if arch == "x86_64": programs.append("abi64check")
         commands += [f"write {user_dir / name} /bin/{name}" for name in programs]
         if tinycc:
@@ -159,6 +159,37 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                     qmp("human-monitor-command", {"command-line": f"sendkey {key} 10"})
                     time.sleep(.06)
 
+            def check_file_ops():
+                command("cp /hello.txt /copied.txt", "exited from /bin/cp with status 0")
+                command("cat /copied.txt", "hello, ZenOS")
+                command("cp /hello.txt /subdir", "exited from /bin/cp with status 0")
+                command("cat /subdir/hello.txt", "hello, ZenOS")
+                command("cp /hello.txt /./hello.txt", "exited from /bin/cp with status 1")
+                command("cat /hello.txt", "hello, ZenOS")
+                command("cp /missing /copied.txt", "exited from /bin/cp with status 1")
+                command("cp /subdir /copied.txt", "exited from /bin/cp with status 1")
+                command("cat /copied.txt", "hello, ZenOS")
+                command("cp /history.txt /copy-large", "exited from /bin/cp with status 0")
+                command("cp /hello.txt /copied.txt", "exited from /bin/cp with status 0")
+                command("mv /copied.txt /renamed-long-filename.txt", "exited from /bin/mv with status 0")
+                command("cat /renamed-long-filename.txt", "hello, ZenOS")
+                command("mv /renamed-long-filename.txt /subdir", "exited from /bin/mv with status 0")
+                command("cat /subdir/renamed-long-filename.txt", "hello, ZenOS")
+                command("mv /subdir/renamed-long-filename.txt /subdir/bar.dat", "exited from /bin/mv with status 0")
+                command("cat /subdir/bar.dat", "hello, ZenOS")
+                command("mv /subdir/bar.dat /subdir/bar.dat", "exited from /bin/mv with status 0")
+                command("mv /hello.txt /missing-dir/result", "exited from /bin/mv with status 1")
+                command("cat /hello.txt", "hello, ZenOS")
+                command("cp /subdir/bar.dat /moved-copy", "exited from /bin/cp with status 0")
+                command("mkdir /file-op-batch")
+                command("cp /hello.txt /moved-copy /file-op-batch", "exited from /bin/cp with status 0")
+                command("cat /file-op-batch/hello.txt", "hello, ZenOS")
+                command("mv /file-op-batch/hello.txt /file-op-batch/moved-copy /subdir", "exited from /bin/mv with status 0")
+                command("cat /subdir/moved-copy", "hello, ZenOS")
+                # Restore the fixture used later by the broader shell checks.
+                command("echo foo > /subdir/bar.dat")
+                print("PASS: cp and mv files, directories, replacement and errors", flush=True)
+
             def check_kilo():
                 command("kilo /hello.txt", "Ctrl-S = save")
                 text = wait_for("hello, ZenOS")
@@ -225,6 +256,23 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
             if arch == "x86_64": command("abi64check", "PASS: x86-64 ABI")
+            if file_ops_only:
+                check_file_ops()
+                qmp("quit")
+                proc.wait(timeout=5)
+                subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                for path, expected in [("/moved-copy", "hello, ZenOS\n"),
+                                       ("/hello.txt", "hello, ZenOS\n"),
+                                       ("/copy-large", history.read_text())]:
+                    saved = subprocess.run(["debugfs", "-R", "cat " + path, str(disk)],
+                                           text=True, capture_output=True, check=True)
+                    assert saved.stdout == expected, (path, saved.stdout)
+                for path in ["/copied.txt", "/renamed-long-filename.txt", "/subdir/renamed-long-filename.txt"]:
+                    saved = subprocess.run(["debugfs", "-R", "stat " + path, str(disk)],
+                                           text=True, capture_output=True, check=True)
+                    assert "File not found" in saved.stderr, path
+                print("PASS: cp/mv persistence, removed sources and ext2 integrity", flush=True)
+                return
             if kilo_only:
                 check_kilo()
                 qmp("quit")
@@ -438,6 +486,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("./native-hello", "Hello from native TinyCC!")
             # Send editor input without the shell command helper's clear command.
             command("cd /")
+            check_file_ops()
             check_kilo()
             command("stdiocheck", "stdio checks passed")
             command("libccheck", "libc core checks passed")
@@ -541,5 +590,6 @@ if __name__ == "__main__":
     parser.add_argument("--arch", choices=["x86_64"], default="x86_64")
     parser.add_argument("--compiler-only", action="store_true")
     parser.add_argument("--kilo-only", action="store_true", help="exercise Kilo and offline disk integrity")
+    parser.add_argument("--file-ops-only", action="store_true", help="exercise cp/mv and offline disk checks")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only)
+    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only, args.file_ops_only)

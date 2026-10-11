@@ -16,7 +16,7 @@ FLAGS = ['-nostdinc', '-isystem', COMPILER_HEADERS, '-m64', '-O2', '-g', '-ffree
 KFLAGS = ['-D__is_libk', '-D__is_kernel', '-mcmodel=kernel', '-mgeneral-regs-only', '-I'+str(ROOT/'kernel/include'),
           '-I'+str(ROOT/'libk/include'), '-I'+str(ROOT/'userlibc/include')]
 UFLAGS = ['-I'+str(ROOT/'userlibc/include')]
-PROGRAMS = ['shell', 'hello', 'cat', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo']
+PROGRAMS = ['shell', 'hello', 'cat', 'cp', 'mv', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo']
 TESTS = {'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
          'stdiocheck': 'stdio_core', 'intcheck': 'interrupt', 'abi64check': 'abi64'}
 

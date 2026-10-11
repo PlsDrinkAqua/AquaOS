@@ -184,7 +184,7 @@ static int run_command(const char *line) {
     }
 
     if (stage->argc == 1 && strcmp(name, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, kilo, cd, pwd, taskinfo, exit");
+        puts("Commands: help, echo, about, clear, hello, cat, cp, mv, ls, mkdir, rm, rmdir, kilo, cd, pwd, taskinfo, exit");
         puts("Use exit or Ctrl+D to leave the shell; Ctrl+D ends cat input.");
         return 0;
     }
