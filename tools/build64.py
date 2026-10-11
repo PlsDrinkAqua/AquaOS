@@ -16,7 +16,7 @@ FLAGS = ['-nostdinc', '-isystem', COMPILER_HEADERS, '-m64', '-O2', '-g', '-ffree
 KFLAGS = ['-D__is_libk', '-D__is_kernel', '-mcmodel=kernel', '-mgeneral-regs-only', '-I'+str(ROOT/'kernel/include'),
           '-I'+str(ROOT/'libk/include'), '-I'+str(ROOT/'userlibc/include')]
 UFLAGS = ['-I'+str(ROOT/'userlibc/include')]
-PROGRAMS = ['shell', 'hello', 'cat', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'meinkampf']
+PROGRAMS = ['shell', 'hello', 'cat', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo']
 TESTS = {'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
          'stdiocheck': 'stdio_core', 'intcheck': 'interrupt', 'abi64check': 'abi64'}
 
@@ -32,6 +32,9 @@ def compile_file(source, extra):
 
 def build():
     OUT.mkdir(parents=True, exist_ok=True)
+    # Remove obsolete editor artifacts so disk generation cannot reinstall it.
+    for obsolete in [OUT/'user/meinkampf', OUT/'obj/user/meinkampf.o']:
+        obsolete.unlink(missing_ok=True)
     sources = [p.relative_to(ROOT) for p in (ROOT/'kernel/kernel').rglob('*.c')]
     sources += [p.relative_to(ROOT) for p in (ROOT/'kernel/arch/x86_64').glob('*.c')]
     sources += [p.relative_to(ROOT) for p in (ROOT/'libk').rglob('*.c')]

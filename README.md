@@ -16,3 +16,7 @@ Build artifacts live in `build/x86_64`. Development disks remain under `disk/`.
 
 See [build requirements and architecture](docs/X86_64.md),
 [TinyCC](ports/tinycc/README.md), and [shell features](docs/SHELL.md).
+
+`kilo <file>` opens the lightweight editor with C/C++ syntax highlighting and
+search. Ctrl+S saves, Ctrl+F searches, and Ctrl+Q quits. See the
+[Kilo port](ports/kilo/README.md) for controls and verification.

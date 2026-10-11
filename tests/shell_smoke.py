@@ -14,7 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False, kilo_only=False):
     tinycc = tinycc or selfhost
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
@@ -30,10 +30,15 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         hello.write_text("hello, ZenOS\n")
         bar = tmp / "bar.dat"
         bar.write_text("foo\n")
-        commands = ["mkdir /bin", "mkdir /subdir", f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
+        commands = ["mkdir /bin", "mkdir /subdir", "mkdir /etc",
+                    f"write {ROOT / 'ports/kilo/COPYING'} /etc/kilo.COPYING",
+                    f"write {hello} /hello.txt", f"write {bar} /subdir/bar.dat"]
         history = tmp / "history.txt"
         history.write_text("".join(f"history line {i:04d}\n" for i in range(1100)))
         commands.append(f"write {history} /history.txt")
+        kilo_display = tmp / "kilo-display.c"
+        kilo_display.write_text("int " + "x" * 100 + "\nsecond row\n")
+        commands.append(f"write {kilo_display} /kilo-display.c")
         linked = tmp / "linked"
         linked.write_text("linked")
         oversized = tmp / "oversized"
@@ -43,7 +48,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "meinkampf", "libccheck", "stdiocheck", "intcheck"]
+        programs = ["shell", "hello", "cat", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "kilo", "libccheck", "stdiocheck", "intcheck"]
         if arch == "x86_64": programs.append("abi64check")
         commands += [f"write {user_dir / name} /bin/{name}" for name in programs]
         if tinycc:
@@ -149,6 +154,55 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 print(f"PASS: {text}", flush=True)
                 return output
 
+            def visual_keys(sequence):
+                for key in sequence:
+                    qmp("human-monitor-command", {"command-line": f"sendkey {key} 10"})
+                    time.sleep(.06)
+
+            def check_kilo():
+                command("kilo /hello.txt", "Ctrl-S = save")
+                text = wait_for("hello, ZenOS")
+                assert text.splitlines()[0] == "hello, ZenOS", text
+                assert all("\r" not in line for line in text.split("\n")), text
+                visual_keys(["ctrl-q"])
+                wait_for("exited from /bin/kilo with status 0")
+                # A long first row must not wrap and scroll out of the viewport.
+                command("kilo /kilo-display.c", "Ctrl-S = save")
+                text = wait_for("second row")
+                assert text.splitlines()[0] == "int " + "x" * 75, text
+                assert text.splitlines()[1] == "second row", text
+                visual_keys(["ctrl-q"])
+                wait_for("exited from /bin/kilo with status 0")
+                command("kilo /kilo.c", "HELP: Ctrl-S = save")
+                visual_keys([*"int", "spc", *"value", "equal", "1", "ret", *"second"])
+                wait_for("(modified)")
+                visual_keys(["ctrl-q"])
+                wait_for("File has unsaved changes")
+                visual_keys(["ctrl-s"])
+                wait_for("19 bytes written on disk")
+                visual_keys(["ctrl-q"])
+                wait_for("exited from /bin/kilo with status 0")
+                command("cat /kilo.c", "\nint value=1\nsecond\n")
+                command("kilo /kilo.c", "Ctrl-S = save")
+                text = screen()
+                assert text.splitlines()[:2] == ["int value=1", "second"], text
+                visual_keys(["down", "home", "delete", "end", "backspace", "ctrl-f", *"value", "esc", "ctrl-s"])
+                wait_for("17 bytes written on disk")
+                visual_keys(["ctrl-q"])
+                wait_for("exited from /bin/kilo with status 0")
+                command("cat /kilo.c", "\nint value=1\necon\n")
+                # An existing temporary file must never be overwritten.
+                command("echo recovery > /kilo.c.kilo-tmp")
+                command("kilo /kilo.c", "Ctrl-S = save")
+                visual_keys(["x", "ctrl-s"])
+                wait_for("Can't save")
+                visual_keys(["ctrl-q", "ctrl-q", "ctrl-q", "ctrl-q"])
+                wait_for("exited from /bin/kilo with status 0")
+                command("cat /kilo.c.kilo-tmp", "\nrecovery\n")
+                command("cat /kilo.c", "\nint value=1\necon\n")
+                command("rm /kilo.c.kilo-tmp")
+                print("PASS: Kilo editing, search, reopen and save failure", flush=True)
+
             def check_selfhost_artifacts():
                 if not selfhost:
                     return
@@ -171,6 +225,16 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
             if arch == "x86_64": command("abi64check", "PASS: x86-64 ABI")
+            if kilo_only:
+                check_kilo()
+                qmp("quit")
+                proc.wait(timeout=5)
+                subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                persisted = subprocess.run(["debugfs", "-R", "cat /kilo.c", str(disk)],
+                                           text=True, capture_output=True, check=True)
+                assert persisted.stdout == "int value=1\necon\n", persisted.stdout
+                print("PASS: Kilo disk persistence and ext2 integrity", flush=True)
+                return
             if compiler_only:
                 if not tinycc: raise ValueError("--compiler-only requires --tinycc")
                 command("cd /home/user")
@@ -374,60 +438,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("./native-hello", "Hello from native TinyCC!")
             # Send editor input without the shell command helper's clear command.
             command("cd /")
-            command("meinkampf --line /edited", "meinkampf: /edited")
-
-            def editor_input(text, expected):
-                for char in text:
-                    qmp("human-monitor-command", {"command-line": f"sendkey {keys.get(char, char)} 10"})
-                    time.sleep(.025)
-                qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
-                time.sleep(.2)
-                return wait_for(expected)
-
-            editor_input("a first", "meinkampf*>")
-            editor_input("a last", "a last")
-            editor_input("i 2 middle", "i 2 middle")
-            editor_input("r 1 changed", "r 1 changed")
-            editor_input("d 3", "d 3")
-            editor_input("s", "saved 15 bytes")
-            editor_input("q", "exited from /bin/meinkampf with status 0")
-            command("cat /edited", "\nchanged\nmiddle\n")
-            command("meinkampf --line /edited", "meinkampf: /edited")
-            editor_input("r 2 saved", "meinkampf*>")
-            editor_input("s", "saved 14 bytes")
-            editor_input("a discard", "a discard")
-            editor_input("q", "Discard unsaved changes?")
-            editor_input("y", "exited from /bin/meinkampf with status 0")
-            command("cat /edited", "\nchanged\nsaved\n")
-            command("meinkampf /visual", "NORMAL  /visual")
-
-            def visual_keys(sequence):
-                for key in sequence:
-                    qmp("human-monitor-command", {"command-line": f"sendkey {key} 10"})
-                    time.sleep(.06)
-
-            visual_keys(["i", *"hello", "ret", *"world", "esc"])
-            text = wait_for("NORMAL  /visual [+]")
-            assert text.splitlines()[0] == "hello", text
-            assert text.splitlines()[1] == "world", text
-            visual_keys(["u"])
-            text = wait_for("NORMAL  /visual  1:1")
-            assert "hello" not in text and "world" not in text, text
-            visual_keys(["shift-semicolon", *"redo", "ret"])
-            wait_for("world")
-            visual_keys(["shift-semicolon", "q", "ret"])
-            wait_for("Unsaved changes")
-            visual_keys(["shift-semicolon", "w", "q", "ret"])
-            wait_for("exited from /bin/meinkampf with status 0")
-            command("cat /visual", "\nhello\nworld")
-            command("meinkampf /visual", "NORMAL  /visual")
-            visual_keys(["right", "down", "left", "up", "i", "right", "down", "left", "up", "x", "esc"])
-            text = wait_for("NORMAL  /visual [+]")
-            assert text.splitlines()[0] == "xhello", text
-            visual_keys(["u", "down", "d", "d", "shift-semicolon", "w", "q", "ret"])
-            wait_for("exited from /bin/meinkampf with status 0")
-            visual_keys(["up", "down", "left", "right"])
-            command("cat /visual", "\nhello\n")
+            check_kilo()
             command("stdiocheck", "stdio checks passed")
             command("libccheck", "libc core checks passed")
             command("memcheck", "memory reliability checks passed", seconds=90)
@@ -501,11 +512,11 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                                        text=True, capture_output=True, check=True)
             if persisted.stdout != "saved\n":
                 raise AssertionError("Directory contents did not persist: " + persisted.stdout)
-            edited = subprocess.run(["debugfs", "-R", "cat /edited", str(disk)],
-                                    text=True, capture_output=True, check=True)
-            if edited.stdout != "changed\nsaved\n":
-                raise AssertionError("Editor save did not persist: " + edited.stdout)
-            for removed in ["/interrupt-live", "/unwanted", "/edited.mk-tmp", "/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
+            kilo = subprocess.run(["debugfs", "-R", "cat /kilo.c", str(disk)],
+                                  text=True, capture_output=True, check=True)
+            if kilo.stdout != "int value=1\necon\n":
+                raise AssertionError("Kilo save did not persist: " + kilo.stdout)
+            for removed in ["/interrupt-live", "/unwanted", "/fscheck-dir", "/remove-me", "/fscheck-link-a", "/fscheck-link-b"]:
                 result = subprocess.run(["debugfs", "-R", f"stat {removed}", str(disk)],
                                         text=True, capture_output=True, check=True)
                 if "File not found" not in result.stderr:
@@ -529,5 +540,6 @@ if __name__ == "__main__":
     parser.add_argument("--selfhost", action="store_true", help="rebuild TinyCC twice inside ZenOS and test both compilers (implies --tinycc)")
     parser.add_argument("--arch", choices=["x86_64"], default="x86_64")
     parser.add_argument("--compiler-only", action="store_true")
+    parser.add_argument("--kilo-only", action="store_true", help="exercise Kilo and offline disk integrity")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only)
+    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only)

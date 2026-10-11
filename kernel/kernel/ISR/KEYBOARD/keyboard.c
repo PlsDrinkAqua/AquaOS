@@ -127,6 +127,10 @@ void keyboard_isr() {
         : scancode_to_ascii[scancode];
 
     if (ctrl_down && scancode == 0x20) ascii = 4; /* Ctrl+D: terminal EOF. */
+    /* Full-screen editor controls, delivered as ASCII control bytes. */
+    if (ctrl_down && scancode == 0x1F) ascii = 19; /* Ctrl+S: save. */
+    if (ctrl_down && scancode == 0x10) ascii = 17; /* Ctrl+Q: quit. */
+    if (ctrl_down && scancode == 0x21) ascii = 6;  /* Ctrl+F: find. */
 
     if (ctrl_down && scancode == 0x2E) {
         terminal_follow_output();

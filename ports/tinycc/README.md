@@ -37,7 +37,7 @@ Inside ZenOS:
 cd /home/user
 tcc hello.c -o hello
 ./hello
-meinkampf hello.c
+kilo hello.c
 tcc hello.c -o hello
 ./hello
 ```

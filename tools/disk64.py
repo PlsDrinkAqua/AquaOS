@@ -28,6 +28,7 @@ def create(output):
             stream.truncate(100 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(image)], check=True)
         commands = ['mkdir /bin', 'mkdir /tmp', 'mkdir /etc']
+        commands.append(f'write {quote(ROOT / "ports/kilo/COPYING")} /etc/kilo.COPYING')
         for program in sorted((OUT/'user').iterdir()):
             if program.is_file():
                 commands.append(f'write {quote(program)} {quote("/bin/" + program.name)}')

@@ -4,7 +4,7 @@ The installed ZenOS filesystem uses these directories:
 
 | Directory | Contents |
 | --- | --- |
-| `/bin` | Shell and core commands: cat, ls, echo, mkdir, rm, rmdir, hello, meinkampf |
+| `/bin` | Shell and core commands: cat, ls, echo, mkdir, rm, rmdir, hello, kilo |
 | `/usr/bin` | Native C compiler, tcc |
 | `/usr/include` | Public C library headers, including sys/ and zenos/ |
 | `/usr/lib` | libc.a, crt0.o, and libgcc.a |

@@ -9,6 +9,8 @@
 #define LINE_MAX 128
 #define PIPELINE_MAX 4
 
+extern void _start(void);
+
 static int script_fd = -1;
 
 #include "shell_completion.h"
@@ -182,7 +184,7 @@ static int run_command(const char *line) {
     }
 
     if (stage->argc == 1 && strcmp(name, "help") == 0) {
-        puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, meinkampf, cd, pwd, taskinfo, exit");
+        puts("Commands: help, echo, about, clear, hello, cat, ls, mkdir, rm, rmdir, kilo, cd, pwd, taskinfo, exit");
         puts("Use exit or Ctrl+D to leave the shell; Ctrl+D ends cat input.");
         return 0;
     }
@@ -300,7 +302,7 @@ int main(int argc, char **argv) {
     if (argc > 2) { puts("usage: shell [script]"); return 2; }
     if (argc == 2) return run_script(argv[1]);
 
-    printf("AquaOS shell at %x\n", 0x08048000);
+    printf("AquaOS shell at %p\n", (void *)_start);
 
     for (;;) {
         write_str("\033[0;92mAquaOS\033[96m>\033[0m ");

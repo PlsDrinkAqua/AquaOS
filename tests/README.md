@@ -163,41 +163,12 @@ live malloc allocations. Freed kernel heap memory is retained for reuse;
 returning unused heap pages to the physical allocator and kernel stack guards
 remain future work.
 
-`meinkampf <file>` now opens the full-screen Vim-style editor. See
-[Editor](../docs/EDITOR.md) for modes, motions, search, undo, and save commands.
-The host checks also cover terminal cursor bounds, erase controls and reverse
-video; the QEMU checks exercise visual editing through keyboard input and VGA.
-
-The original line editor starts with `meinkampf --line <file>`.
-A missing file opens an empty buffer. Its commands are:
-
-| Command | Action |
-| --- | --- |
-| `p` | Print the buffer with line numbers |
-| `a text` | Append a line (`a` alone appends a blank line) |
-| `i N text` | Insert before line N; N may be one past the last line |
-| `r N text` | Replace line N |
-| `d N` | Delete line N |
-| `s` | Save (`w` also works) |
-| `q` | Quit, asking before discarding unsaved edits |
-| `q!` | Discard edits and quit |
-| `h` | Show command help |
-
-Replace `N` with an actual line number, starting at 1: `i 1 hello` inserts
-before line 1, and `r 1 hello` replaces line 1. Text after the command separator is literal; quotation
-marks are not stripped. The initial version supports files up to 64 KiB and
-commands up to 511 bytes. NUL-containing files and oversized files are rejected.
-Overlong input is consumed and rejected rather than silently truncated. Loading
-and saving preserves a missing final newline; inserted/replaced lines end in a
-newline. EOF on a dirty buffer asks for confirmation; if input ends again, the
-editor exits with status 1 and leaves the on-disk file unchanged.
-
-Saving writes `<file>.mk-tmp` with exclusive creation, handles partial writes,
-closes it, then renames it over the destination. An existing temporary file is
-never overwritten. Content-write failures retain the buffer and leave the
-original untouched. Failed rename/close can leave a temporary file for recovery.
-The replacement inode uses the normal new-file permissions (0644); saving
-replaces that path's inode rather than modifying other hard links to it.
+`kilo <file>` opens the editor. Ctrl+S saves, Ctrl+F searches, and Ctrl+Q
+quits. See [Kilo](../ports/kilo/README.md) for controls and limits.
+Run `python3 tests/kilo_host.py` for sanitizer and file-I/O checks and
+`python3 tests/terminal_host.py` for terminal cursor, erase and colour checks.
+The QEMU smoke suite checks Kilo editing, display, save/reopen, recovery-file
+collisions and disk persistence.
 
 The supporting `rename(old, new)` API in `<stdio.h>` currently accepts regular
 files within the same directory only. Cross-directory moves return EXDEV;
@@ -208,14 +179,6 @@ Existing destinations are replaced, with open handles retaining the old inode
 until close. `O_CREAT | O_EXCL` returns EEXIST for existing paths. Rename is
 serialized against other filesystem operations, but ext2 metadata updates are
 not journaled: power loss or an I/O error during rename can require recovery.
-
-`python3 tests/editor_host.py` tests editor commands, preservation of files
-without final newlines, dirty-buffer confirmation, invalid/oversized input,
-temporary-file collisions, injected content-write failures, and partial writes.
-It compiles the editor with host file-API adapters. The QEMU smoke suite also
-creates, edits, saves, reopens and replaces a file with the actual `meinkampf`
-command; offline debugfs and e2fsck verify the result. The filesystem helper tests
-exclusive creation and rename while a replaced file remains open.
 
 The first TinyCC libc batch adds:
 

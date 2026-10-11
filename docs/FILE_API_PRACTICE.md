@@ -17,14 +17,14 @@ Inside your existing ZenOS development environment:
 cd /home/user
 mkdir practice
 cd practice
-meinkampf create.c
+kilo create.c
 tcc create.c -o create
 ./create
 ```
 
-Create the directory once. In the editor, `i` enters Insert mode; Escape followed
-by `:wq` and Enter saves and exits. Compile again after each edit. Use a different
-output name from the source file. See [the editor guide](EDITOR.md) for details.
+Create the directory once. Type directly in Kilo; Ctrl+S saves and Ctrl+Q
+quits. Compile again after each edit. Use a different output name from the source
+file. See [the editor guide](../ports/kilo/README.md) for details.
 These commands run inside ZenOS; the workbook itself lives in the host repository.
 The compiler setup is documented in [the TinyCC guide](../ports/tinycc/README.md).
 
