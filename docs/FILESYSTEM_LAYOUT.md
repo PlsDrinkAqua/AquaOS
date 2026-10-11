@@ -13,7 +13,7 @@ The installed ZenOS filesystem uses these directories:
 | `/tmp` | Temporary files |
 | `/etc` | Reserved for system configuration |
 
-Bare command names search `/bin`, then `/usr/bin`. An explicit path such as
+Bare command names search `$PATH`, defaulting to `/bin:/usr/bin:/`. An explicit path such as
 `./hello` or `/bin/cat` runs that path directly. The shell and kernel retain a
 legacy root-program fallback so older disk images can still boot.
 

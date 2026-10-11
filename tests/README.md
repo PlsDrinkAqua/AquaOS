@@ -53,8 +53,10 @@ shell operators are skipped because the shell cannot quote them yet.
 Bare cat copies standard input; press Ctrl+D to finish keyboard input.
 cat accepts multiple paths and '-' for stdin. Nested shells return to their
 parent with `exit` or Ctrl+D at an empty prompt.
-Commands without a slash search `/bin`, `/usr/bin`, then the legacy root
-directory; paths containing a slash are used as written. See
+Commands without a slash search `$PATH`, defaulting to `/bin:/usr/bin:/`;
+paths containing a slash are used as written. Empty PATH entries search the
+current directory. `python3 tests/shell_smoke.py --block-size 4096 --path-only`
+checks search order, inheritance, empty/relative entries and lookup failures. See
 [Filesystem Layout](../docs/FILESYSTEM_LAYOUT.md) for compiler and header paths.
 
 Each process has a working directory, initially /. chdir changes it and

@@ -1,4 +1,29 @@
-# Shell scripts
+# Shell
+
+## Command search
+
+Commands without a slash are searched in the colon-separated `PATH` environment
+variable, from left to right. The initial default is `/bin:/usr/bin:/` unless
+the shell inherits a value. For example:
+
+```sh
+export PATH=/bin:/usr/bin:/home/user
+```
+
+This lets programs installed in `/home/user` run by name. Relative entries are
+resolved against the current directory. Empty entries, including an entirely
+empty PATH, search the current directory. `unset PATH` restores the default
+search behavior; a newly started shell also exports that default if PATH is
+absent. Child shells and external programs inherit exported PATH changes.
+
+Commands containing a slash, such as `./program` or `/bin/kilo`, use that path
+directly. No command-location cache is maintained. Missing or non-directory
+search entries are skipped, as are candidates exceeding the 255-byte path
+limit. A failed executable in an earlier entry stops lookup with status 126;
+if no candidate is found, the shell returns 127. Tab completion continues to
+complete filenames rather than searching PATH.
+
+## Shell scripts
 
 Run a script with `shell path/to/build.sh`. With no argument, `shell` opens an
 interactive prompt. Script commands use the same command lookup, working

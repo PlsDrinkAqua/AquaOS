@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -39,7 +40,7 @@ static void write_str(const char *s) {
 
 static void execute_stage(shell_stage_t *stage) {
     const char *argv[33];
-    char path[LINE_MAX];
+    char path[256];
     for (unsigned i = 0; i < stage->argc; i++)
         argv[i] = stage->command + stage->offsets[i];
     argv[stage->argc] = NULL;
@@ -48,15 +49,34 @@ static void execute_stage(shell_stage_t *stage) {
     int has_slash = 0;
     for (const char *scan = name; *scan; scan++) if (*scan == '/') has_slash = 1;
     if (!has_slash) {
-        const char *directories[] = {"/bin/", "/usr/bin/", "/"};
-        for (unsigned dir = 0; dir < sizeof(directories) / sizeof(directories[0]); dir++) {
-            if (strlen(directories[dir]) + strlen(name) >= sizeof(path)) {
-                puts("shell: program path too long");
-                exit(1);
+        const char *search = getenv("PATH");
+        if (!search) search = "/bin:/usr/bin:/";
+        for (;;) {
+            const char *end = search;
+            while (*end && *end != ':') end++;
+            size_t length = (size_t)(end - search), n = strlen(name);
+            size_t slash = length && search[length - 1] != '/';
+            /* Empty entries mean the current directory; skip paths that cannot
+             * fit rather than hiding valid later search entries. */
+            if (length + slash + n < sizeof(path)) {
+                memcpy(path, search, length);
+                if (slash) path[length++] = '/';
+                memcpy(path + length, name, n + 1);
+                exec(path, argv);
+                int error = errno;
+                /* The current loader also returns ENOENT for invalid ELF.
+                 * Distinguish an existing unusable candidate from a miss. */
+                if (error == ENOENT) {
+                    int fd = open(path, O_RDONLY);
+                    if (fd >= 0) { close(fd); error = EINVAL; }
+                }
+                if (error != ENOENT && error != ENOTDIR) {
+                    fprintf(stderr, "shell: cannot execute %s (errno=%d)\n", path, error);
+                    exit(126);
+                }
             }
-            strcpy(path, directories[dir]);
-            strcpy(path + strlen(path), name);
-            exec(path, argv);
+            if (!*end) break;
+            search = end + 1;
         }
         printf("shell: command not found: %s\n", name);
         exit(127);
@@ -295,6 +315,10 @@ done:
 }
 
 int main(int argc, char **argv) {
+    if (!getenv("PATH") && setenv("PATH", "/bin:/usr/bin:/", 0) < 0) {
+        puts("shell: cannot initialize PATH");
+        return 1;
+    }
     char line[LINE_MAX];
 
     if (zenos_terminal_claim() < 0) { puts("shell: terminal busy"); return 1; }

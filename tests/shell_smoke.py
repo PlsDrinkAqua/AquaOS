@@ -14,7 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False, kilo_only=False, file_ops_only=False):
+def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, selfhost=False, arch="x86_64", compiler_only=False, kilo_only=False, file_ops_only=False, path_only=False):
     tinycc = tinycc or selfhost
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
@@ -51,6 +51,10 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         programs = ["shell", "hello", "cat", "cp", "mv", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "kilo", "libccheck", "stdiocheck", "intcheck"]
         if arch == "x86_64": programs.append("abi64check")
         commands += [f"write {user_dir / name} /bin/{name}" for name in programs]
+        commands += ["mkdir /path-a", "mkdir /path-b",
+                     f"write {user_dir / 'hello'} /path-a/pick",
+                     f"write {user_dir / 'echo'} /path-b/pick",
+                     f"write {hello} /path-a/notexec"]
         if tinycc:
             tree = ROOT / "build/x86_64/root"
             if not (tree / "usr/bin/tcc").is_file():
@@ -59,6 +63,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 target = "/" + entry.relative_to(tree).as_posix()
                 commands.append(f"mkdir {target}" if entry.is_dir() else f'write "{entry}" "{target}"')
         scripts = {
+            "script-path": "pick from-script\n",
             "script-env": 'echo "$PROJECT"\nexport PROJECT="child project"\necho "$PROJECT"\n',
 
             "script-ok": "# comment\n\n  cd /subdir\n\techo first > /script-result # inline\ncat /script-result | cat > /script-copy\necho second >> /script-result && echo chain works\necho hash#word\npwd",
@@ -134,7 +139,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
 
             keys.update({chr(c): "shift-" + chr(c).lower() for c in range(ord("A"), ord("Z") + 1)})
 
-            def command(text, expected=None, seconds=12, clear_screen=True):
+            def command(text, expected=None, seconds=12, clear_screen=True, allow_exec_error=False):
                 if clear_screen:
                     qmp("human-monitor-command", {"command-line": "sendkey ret"})
                     time.sleep(.1)
@@ -149,7 +154,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
                 time.sleep(.35)
                 output = wait_for(expected, seconds) if expected else screen()
-                if "FAIL" in output or "cannot execute" in output:
+                if "FAIL" in output or ("cannot execute" in output and not allow_exec_error and
+                                        (not expected or "cannot execute" not in expected)):
                     raise AssertionError(output)
                 print(f"PASS: {text}", flush=True)
                 return output
@@ -158,6 +164,35 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 for key in sequence:
                     qmp("human-monitor-command", {"command-line": f"sendkey {key} 10"})
                     time.sleep(.06)
+
+            def check_path():
+                command('echo "$PATH"', "\n/bin:/usr/bin:/\n")
+                command("export PATH=/path-a:/path-b:/bin")
+                command("pick", "hello from /hello")
+                command("export PATH=/path-b:/path-a:/bin")
+                command("pick from-second", "\nfrom-second\n")
+                command("/bin/shell /script-path", "\nfrom-script\n")
+                command("/bin/shell", "shell at")
+                command('echo "$PATH"', "\n/path-b:/path-a:/bin\n")
+                command("exit", "exited from /bin/shell with status 0")
+                command("cd /path-b")
+                command("export PATH=.:/bin")
+                command("pick relative", "\nrelative\n")
+                for search in (":/bin", "/missing:/bin:", "/missing::/bin", ""):
+                    command("export PATH=" + search)
+                    command("pick empty-entry", "\nempty-entry\n")
+                command("export PATH=/missing")
+                command("pick", "shell: command not found: pick")
+                command("/bin/echo $?", "\n127\n", clear_screen=False)
+                command("./pick explicit", "\nexplicit\n")
+                command("export PATH=/path-a/:/path-b/:/bin/")
+                command("notexec", "shell: cannot execute /path-a/notexec")
+                command("/bin/echo $?", "\n126\n", clear_screen=False, allow_exec_error=True)
+                command("unset PATH")
+                command("cat /hello.txt", "hello, ZenOS")
+                command("export PATH=/bin:/usr/bin:/")
+                command("cd /")
+                print("PASS: PATH order, inheritance, relative/empty entries and explicit paths", flush=True)
 
             def check_file_ops():
                 command("cp /hello.txt /copied.txt", "exited from /bin/cp with status 0")
@@ -256,6 +291,12 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             qmp("human-monitor-command", {"command-line": "sendkey ret 10"})
             wait_for("shell at")
             if arch == "x86_64": command("abi64check", "PASS: x86-64 ABI")
+            if path_only:
+                check_path()
+                qmp("quit")
+                proc.wait(timeout=5)
+                subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
+                return
             if file_ops_only:
                 check_file_ops()
                 qmp("quit")
@@ -298,6 +339,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
                 check_selfhost_artifacts()
                 return
+            check_path()
             command("shell /script-ok", "exited from /bin/shell with status 0")
             command("cat /script-result", "\nfirst\nsecond\n")
             command("cat /script-copy", "\nfirst\n")
@@ -591,5 +633,6 @@ if __name__ == "__main__":
     parser.add_argument("--compiler-only", action="store_true")
     parser.add_argument("--kilo-only", action="store_true", help="exercise Kilo and offline disk integrity")
     parser.add_argument("--file-ops-only", action="store_true", help="exercise cp/mv and offline disk checks")
+    parser.add_argument("--path-only", action="store_true", help="exercise shell PATH lookup")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only, args.file_ops_only)
+    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only, args.file_ops_only, args.path_only)
