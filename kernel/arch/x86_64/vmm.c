@@ -44,7 +44,7 @@ int vmm_map_page(uintptr_t va, uintptr_t pa, uint32_t flags) {
     if (user ? (va<PAGE || va>=USER_ADDRESS_LIMIT) : (va<KERNEL_DIRECT_BASE)) return -1;
     uint64_t *e=walk(current,va,1,user);
     if (!e || (*e&1)) return -1;
-    *e=(pa&ADDRESS)|(flags&7)|1;
+    *e=(pa&ADDRESS)|(flags&31U)|1;
     __asm__ volatile("invlpg (%0)" :: "r"(va):"memory");
     return 0;
 }

@@ -19,6 +19,7 @@
 #include <kernel/task.h>
 #include <kernel/timer.h>
 #include <kernel/pci.h>
+#include <kernel/e1000.h>
 
 #define VMM_PRESENT  (1<<0)
 #define VMM_RW       (1<<1)
@@ -75,6 +76,7 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 	kprintf("done \n");
 
     pci_init();
+    e1000_init();
 
         kprintf("Loading Init Task.................");
         uintptr_t user_entry = 0;

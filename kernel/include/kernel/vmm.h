@@ -6,6 +6,9 @@
 #include <stdbool.h>
 #include <kernel/paging.h>
 
+#define VMM_WRITE_THROUGH (1U << 3)
+#define VMM_CACHE_DISABLE (1U << 4)
+
 void vmm_init();
 
 page_directory_t *vmm_create_address_space(void);

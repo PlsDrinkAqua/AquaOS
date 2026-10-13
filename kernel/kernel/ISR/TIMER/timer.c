@@ -4,6 +4,7 @@
 #include <kernel/interrupt_frame.h>
 #include <kernel/task.h>
 #include <kernel/timer.h>
+#include <kernel/e1000.h>
 
 #define PIT_COMMAND_PORT 0x43
 #define PIT_CHANNEL0_PORT 0x40
@@ -36,6 +37,8 @@ uint32_t timer_ticks(void) {
 
 void timer_isr(interrupt_frame_t *regs) {
     ticks++;
+    /* Poll a bounded number of RX descriptors; NIC interrupts stay masked. */
+    e1000_poll();
     task_wake_sleepers(ticks);
 
     if ((ticks % TIMER_QUANTUM_TICKS) == 0) {
