@@ -33,6 +33,16 @@ static inline void outw(uint16_t port, uint16_t value) {
 }
 
 
+static inline uint32_t inl(uint16_t port) {
+    uint32_t value;
+    __asm__ volatile ("inl %w1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static inline void outl(uint16_t port, uint32_t value) {
+    __asm__ volatile ("outl %0, %w1" : : "a"(value), "Nd"(port));
+}
+
 static inline void io_wait(void)
 {
     outb(0x80, 0);

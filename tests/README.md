@@ -396,3 +396,6 @@ Environment checks in the QEMU suite cover export/unset, quoted and braced
 expansion, child-shell isolation, and previous exit status. `/libccheck` also
 checks libc environment mutation, fork/exec/spawn inheritance, invalid envp,
 and oversized environment rejection.
+
+Networking/PCI boot checks: `python3 tests/network_smoke.py` after rebuilding
+the kernel and ISO. See [networking foundations](../docs/NETWORKING.md).

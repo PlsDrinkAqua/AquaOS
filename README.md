@@ -15,7 +15,7 @@ Build artifacts live in `build/x86_64`. Development disks remain under `disk/`.
 `sh clean.sh` removes build artifacts without removing guest disks.
 
 See [build requirements and architecture](docs/X86_64.md),
-[TinyCC](ports/tinycc/README.md), and [shell features](docs/SHELL.md).
+[TinyCC](ports/tinycc/README.md), and [shell features](docs/SHELL.md), and [networking foundations](docs/NETWORKING.md).
 
 `kilo <file>` opens the lightweight editor with C/C++ syntax highlighting and
 search. Ctrl+S saves, Ctrl+F searches, and Ctrl+Q quits. See the
