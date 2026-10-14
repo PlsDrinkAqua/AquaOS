@@ -399,3 +399,5 @@ and oversized environment rejection.
 
 Networking/PCI boot checks: `python3 tests/network_smoke.py` after rebuilding
 the kernel and ISO. See [networking foundations](../docs/NETWORKING.md).
+
+ARP validation and retry host checks are documented in [networking](../docs/NETWORKING.md#arp-gateway-resolution). The QEMU network smoke suite also checks gateway resolution against captured ARP packets.

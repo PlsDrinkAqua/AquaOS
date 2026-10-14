@@ -1,5 +1,7 @@
 #include <kernel/e1000.h>
 #include <kernel/errno.h>
+#include <kernel/net.h>
+#include <kernel/timer.h>
 #include <kernel/layout.h>
 #include <kernel/pci.h>
 #include <kernel/vmm.h>
@@ -244,6 +246,7 @@ void e1000_poll(void) {
         if (!rx_fragment && (status & RX_END) && !desc->errors &&
             length >= 14 && length <= RX_BUFFER_SIZE) {
             const uint8_t *packet = (const uint8_t *)(KERNEL_DIRECT_BASE + rx_buffers[rx_next]);
+            net_receive(packet, length);
             char destination[18], source[18];
             format_mac(packet, destination);
             format_mac(packet + 6, source);
@@ -321,4 +324,10 @@ void e1000_init(void) {
             (status & E1000_STATUS_LU) ? "up" : "down", status);
     receive_init();
     transmit_init();
+    if (rx_ready && tx_ready) {
+        uint8_t station[6];
+        for (unsigned i = 0; i < 6; ++i)
+            station[i] = i < 4 ? low >> (i * 8) : high >> ((i - 4) * 8);
+        net_init(station, timer_ticks());
+    }
 }

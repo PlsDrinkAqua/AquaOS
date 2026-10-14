@@ -59,7 +59,8 @@ def boot(tmp, disk, label, devices, expected):
                             qmp('human-monitor-command', {'command-line': 'sendkey ret'})
                         if 'fatal kernel exception' in screen:
                             raise AssertionError(screen)
-                        if 'shell at' in screen and expected in screen:
+                        if ('shell at' in screen and expected in screen and
+                            (not devices or 'ARP: gateway 10.0.2.2 MAC=' in screen)):
                             break
                         time.sleep(.1)
                     else:
@@ -108,6 +109,24 @@ def boot(tmp, disk, label, devices, expected):
                     assert captured == original and offset + captured <= len(capture_data)
                     packets.append(capture_data[offset:offset + captured])
                     offset += captured
+                guest_mac = bytes.fromhex('060706070607')
+                guest_ip, gateway_ip = bytes([10,0,2,15]), bytes([10,0,2,2])
+                requests = [p for p in packets if len(p) >= 42 and
+                            p[12:22] == bytes.fromhex('08060001080006040001') and p[6:12] == guest_mac]
+                assert requests, 'No ARP request captured'
+                for packet in requests:
+                    assert packet[:6] == bytes([255])*6 and packet[22:28] == guest_mac
+                    assert packet[28:32] == guest_ip and packet[32:38] == bytes(6)
+                    assert packet[38:42] == gateway_ip and packet[42:] == bytes(18), packet.hex()
+                replies = [p for p in packets if len(p) >= 42 and
+                           p[12:22] == bytes.fromhex('08060001080006040002') and
+                           p[28:32] == gateway_ip and p[38:42] == guest_ip]
+                assert replies, 'No gateway ARP reply captured'
+                reply = replies[0]
+                assert reply[:6] == guest_mac and reply[32:38] == guest_mac
+                assert reply[6:12] == reply[22:28]
+                learned = ':'.join(f'{byte:02x}' for byte in reply[22:28])
+                assert f'ARP: gateway 10.0.2.2 MAC={learned}' in screen, screen
                 prefix = bytes.fromhex('ffffffffffff06070607060788b5') + b'ZenOS TX probe'
                 probes = [packet for packet in packets if packet.startswith(prefix)]
                 assert len(probes) == (70 if TX_STRESS else 1), probes

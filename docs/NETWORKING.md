@@ -2,7 +2,8 @@
 
 ZenOS provides PCI discovery and a polling E1000 driver with receive and
 transmit DMA rings. It sends one diagnostic Ethernet broadcast at boot.
-ARP, IP, DHCP and ping are not implemented yet.
+ARP resolves the static gateway and answers requests for the guest IP.
+IPv4 packet handling, DHCP and ping are not implemented yet.
 
 ## Development network
 
@@ -11,7 +12,8 @@ Run `sh qemu.sh`. The launcher creates one E1000 (Intel 82540EM, PCI
 It explicitly sets the subnet to `10.0.2.0/24`, host/gateway to `10.0.2.2`,
 and first DHCP lease to `10.0.2.15`. QEMU's default DNS proxy is `10.0.2.3`.
 For the future static-IP milestone, use `10.0.2.15/24` with that gateway and DNS.
-These are harness settings, not configuration currently applied by the guest.
+The guest now uses static IP `10.0.2.15/24` and resolves gateway `10.0.2.2`.
+DNS is not yet used.
 
 Each launch retains `network.pcap` beside `dev.img` under its new
 `disk/zenos64.*` directory and prints both paths. Open the capture in Wireshark
@@ -85,7 +87,7 @@ The legacy TX ring has 32 descriptors and keeps one slot unused. Each frame
 requests EOP, IFCS and RS; completed descriptors are reclaimed only after DMA
 sets DD. Submission and timer polling are serialized by interrupt masking on
 the single CPU. NIC interrupts remain masked. There are no retransmissions,
-completion callbacks, link-down timeouts or protocol handling yet.
+completion callbacks or TX link-down timeouts yet.
 
 Register and descriptor programming follows the
 [Intel 8254x software developer manual](https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf).
@@ -96,3 +98,39 @@ Register and descriptor programming follows the
 PCI layouts, and then rebuilds the normal kernel and ISO. The no-NIC boot is
 also checked. The stress mode changes build artifacts; run it with other
 builds stopped. Guest development disks are untouched.
+
+## ARP gateway resolution
+
+`kernel/kernel/NET/net.c` handles Ethernet/IPv4 ARP using the wire format in
+[RFC 826](https://www.rfc-editor.org/rfc/rfc826). After both DMA rings initialize,
+it broadcasts an ARP request for `10.0.2.2`, using static sender IP `10.0.2.15`
+and the station MAC read back from the NIC. Timer polling retries at one-second
+intervals (the current PIT runs at 100 Hz), with at most three attempts.
+Resolution stops retries and prints `ARP: gateway 10.0.2.2 MAC=...`.
+
+The driver passes complete, error-free RX frames to `net_receive()` before
+recycling DMA buffers. The handler checks frame size, Ethernet destination,
+ARP hardware/protocol types, address lengths, opcode, sender MAC validity and
+agreement with the Ethernet source, and target IP. Only a directed gateway
+reply with our target MAC, following a resolution attempt, populates the single
+cache entry. `net_gateway_mac()` copies that entry for future IP transmission.
+ARP requests for our IP receive a unicast reply. Unknown EtherTypes are ignored
+by the network handler. All network state access currently requires interrupts
+disabled on the single CPU; received buffer pointers are never retained.
+
+This is a static, single-interface milestone: no general ARP table, expiry,
+address conflict detection, VLAN support, DHCP or IP routing implementation.
+A full TX queue can drop an ARP reply; bounded gateway retries cover lost
+requests without blocking the timer. ARP does not authenticate peer identities.
+
+The QEMU network smoke test checks request fields, captures the gateway reply,
+and compares its sender MAC with the guest's resolution message in all three
+PCI layouts. Host checks exercise malformed/truncated packets, cache population,
+request replies, bounded retries and timer wraparound:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include \
+  tests/arp_host.c kernel/kernel/NET/net.c -o /tmp/zenos-arp-host
+/tmp/zenos-arp-host
+```
