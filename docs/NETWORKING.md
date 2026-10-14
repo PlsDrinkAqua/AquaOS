@@ -1,8 +1,8 @@
 # Networking foundations
 
-Steps 1 and 2 provide a reproducible QEMU network and conventional PCI discovery.
-The NIC driver and Ethernet/IP protocols are still to be implemented; ZenOS
-cannot send packets, acquire an IP address, or ping yet.
+ZenOS provides PCI discovery and a polling E1000 driver with receive and
+transmit DMA rings. It sends one diagnostic Ethernet broadcast at boot.
+ARP, IP, DHCP and ping are not implemented yet.
 
 ## Development network
 
@@ -16,7 +16,8 @@ These are harness settings, not configuration currently applied by the guest.
 Each launch retains `network.pcap` beside `dev.img` under its new
 `disk/zenos64.*` directory and prints both paths. Open the capture in Wireshark
 or inspect it with `tcpdump -nn -r disk/zenos64.XXXXXX/network.pcap`.
-Before the NIC driver exists, an empty capture with a PCAP header is expected.
+Expect a 60-byte broadcast with experimental EtherType 0x88b5 and payload
+`ZenOS TX probe`, sourced from the programmed station MAC `06:07:06:07:06:07`.
 The user backend requires no TAP device or root privileges. Future guest
 connections can use its outbound NAT; arbitrary inbound connections require
 explicit forwarding. Host-to-guest ping is not a suitable test of this backend.
@@ -51,8 +52,8 @@ CF8/CFC transactions preserve and disable interrupts on this single-CPU kernel.
 Unrelated devices are enumerated without changing their command registers.
 Missing or unsupported NICs do not prevent boot.
 
-BAR addresses are physical addresses. Step 3 must map MMIO with suitable cache
-attributes, allocate DMA buffers, and initialize the card before using it.
+BAR addresses are physical addresses. The driver maps MMIO uncached and
+allocates physically contiguous, page-aligned descriptor storage and DMA buffers.
 The reported IRQ is firmware routing information; discovery does not install an
 IRQ handler or unmask the NIC interrupt. Extended PCIe config space, firmware
 resource allocation, BAR sizing and SMP locking are outside this implementation.
@@ -70,3 +71,28 @@ E1000 on the root bus, E1000 behind a PCI bridge, E1000 as a secondary
 function of a multifunction slot, and no NIC. It checks guest
 BAR/IRQ decoding against QEMU's inventory, command enable bits, successful boot,
 and Ethernet PCAP headers. Existing development disks are untouched.
+
+## Transmit interface
+
+`e1000_transmit(frame, length)` accepts a kernel Ethernet frame of 14–1514
+bytes, excluding FCS. It copies the frame into driver-owned DMA storage and
+zero-pads it to at least 60 bytes; hardware appends FCS. A successful return
+means queued, not delivered. The caller can reuse its buffer immediately.
+Invalid inputs return `-K_EINVAL`, an unavailable driver returns `-K_ENODEV`,
+and a full queue returns `-K_EAGAIN` without waiting.
+
+The legacy TX ring has 32 descriptors and keeps one slot unused. Each frame
+requests EOP, IFCS and RS; completed descriptors are reclaimed only after DMA
+sets DD. Submission and timer polling are serialized by interrupt masking on
+the single CPU. NIC interrupts remain masked. There are no retransmissions,
+completion callbacks, link-down timeouts or protocol handling yet.
+
+Register and descriptor programming follows the
+[Intel 8254x software developer manual](https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf).
+
+`python3 tests/network_smoke.py` checks the exact captured diagnostic frame.
+`python3 tests/network_smoke.py --tx-stress` builds test-only traffic, checks
+70 frames and completed descriptors across multiple ring wraps for all three
+PCI layouts, and then rebuilds the normal kernel and ISO. The no-NIC boot is
+also checked. The stress mode changes build artifacts; run it with other
+builds stopped. Guest development disks are untouched.

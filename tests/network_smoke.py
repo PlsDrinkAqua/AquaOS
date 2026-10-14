@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check PCI discovery and the QEMU network harness using a disposable disk."""
+import argparse
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -67,6 +69,9 @@ def boot(tmp, disk, label, devices, expected):
                         assert match, screen
                         address, irq, pin, command_bits = (int(match[1], 16), int(match[2]), int(match[3]), int(match[4], 16))
                         assert address and 0 < irq < 16 and pin == 1 and command_bits & 7 == 7, screen
+                        assert 'E1000: TX ready' in screen and 'TX probe queued' in screen, screen
+                        if TX_STRESS:
+                            assert 'TX stress PASS' in screen, screen
                         assert 'BAR0 MMIO' in screen and 'BAR1 IO' in screen, screen
                         # Compare decoded guest BAR/IRQ against QEMU's device inventory.
                         def find_nic(buses):
@@ -88,11 +93,27 @@ def boot(tmp, disk, label, devices, expected):
                     qmp('quit')
             proc.wait(timeout=5)
             if devices:
-                header = capture.read_bytes()[:24]
+                capture_data = capture.read_bytes()
+                header = capture_data[:24]
                 assert len(header) == 24, 'PCAP header missing'
                 endian = '<' if header[:4] == b'\xd4\xc3\xb2\xa1' else '>'
                 magic, major, minor, _, _, snaplen, linktype = struct.unpack(endian + 'IHHIIII', header)
                 assert magic == 0xa1b2c3d4 and (major, minor) == (2, 4) and snaplen and linktype == 1, header
+                packets = []
+                offset = 24
+                while offset < len(capture_data):
+                    assert offset + 16 <= len(capture_data), 'Truncated PCAP record'
+                    _, _, captured, original = struct.unpack_from(endian + 'IIII', capture_data, offset)
+                    offset += 16
+                    assert captured == original and offset + captured <= len(capture_data)
+                    packets.append(capture_data[offset:offset + captured])
+                    offset += captured
+                prefix = bytes.fromhex('ffffffffffff06070607060788b5') + b'ZenOS TX probe'
+                probes = [packet for packet in packets if packet.startswith(prefix)]
+                assert len(probes) == (70 if TX_STRESS else 1), probes
+                for index, packet in enumerate(probes):
+                    expected_frame = prefix + bytes([index if TX_STRESS else 0]) + bytes(31)
+                    assert packet == expected_frame, packet.hex()
             print(f'PASS: {label}')
         finally:
             if proc.poll() is None:
@@ -120,4 +141,18 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--tx-stress', action='store_true', help='build test-only TX ring wrap traffic')
+    TX_STRESS = parser.parse_args().tx_stress
+    if TX_STRESS:
+        try:
+            environment = dict(os.environ)
+            environment['ZENOS64_CC'] = environment.get('ZENOS64_CC', 'gcc') + ' -DE1000_TX_STRESS'
+            subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=environment, check=True)
+            subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+            main()
+        finally:
+            subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
+            subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+    else:
+        main()

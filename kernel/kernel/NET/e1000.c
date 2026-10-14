@@ -1,4 +1,5 @@
 #include <kernel/e1000.h>
+#include <kernel/errno.h>
 #include <kernel/layout.h>
 #include <kernel/pci.h>
 #include <kernel/vmm.h>
@@ -19,6 +20,16 @@
 #define E1000_RDH    0x2810U
 #define E1000_RDT    0x2818U
 #define E1000_MTA    0x5200U
+#define E1000_TCTL   0x0400U
+#define E1000_TIPG   0x0410U
+#define E1000_TDBAL  0x3800U
+#define E1000_TDBAH  0x3804U
+#define E1000_TDLEN  0x3808U
+#define E1000_TDH    0x3810U
+#define E1000_TDT    0x3818U
+#define TX_COUNT 32U
+#define TX_DONE 1U
+#define TX_COMMAND (1U | 2U | 8U) /* EOP, IFCS, RS. */
 #define RX_COUNT 32U
 #define RX_BUFFER_SIZE 2048U
 #define RX_DONE 1U
@@ -61,6 +72,119 @@ static void format_mac(const uint8_t *bytes, char out[18]) {
 
 static uint32_t read_register(unsigned offset) {
     return registers[offset / sizeof(uint32_t)];
+}
+
+/* One descriptor per frame; buffers stay owned by DMA until DD. */
+typedef struct {
+    uint64_t address;
+    uint16_t length;
+    uint8_t checksum_offset, command;
+    uint8_t status, checksum_start;
+    uint16_t special;
+} tx_descriptor_t;
+_Static_assert(sizeof(tx_descriptor_t) == 16, "E1000 TX descriptor size");
+static volatile tx_descriptor_t *tx_ring;
+static uint32_t tx_buffers[TX_COUNT];
+static unsigned tx_next, tx_clean, tx_pending;
+static int tx_ready;
+
+static void transmit_reclaim(void) {
+    while (tx_pending && (tx_ring[tx_clean].status & TX_DONE)) {
+        __asm__ volatile("lfence" ::: "memory");
+        tx_clean = (tx_clean + 1) % TX_COUNT;
+        --tx_pending;
+    }
+}
+
+int e1000_transmit(const void *frame, size_t length) {
+    if (!frame || length < 14 || length > E1000_FRAME_MAX) return -K_EINVAL;
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+    int result = -K_ENODEV;
+    if (!tx_ready) goto out;
+    transmit_reclaim();
+    result = -K_EAGAIN;
+    /* Leave one descriptor unused so TDT never catches an unconsumed TDH. */
+    if (tx_pending == TX_COUNT - 1) goto out;
+    volatile tx_descriptor_t *desc = &tx_ring[tx_next];
+    uint8_t *buffer = (uint8_t *)(KERNEL_DIRECT_BASE + tx_buffers[tx_next]);
+    kmemcpy(buffer, frame, length);
+    /* Pad short frames explicitly; callers need not supply padding or FCS. */
+    if (length < 60) {
+        kmemset(buffer + length, 0, 60 - length);
+        length = 60;
+    }
+    desc->length = length;
+    desc->checksum_offset = 0;
+    desc->checksum_start = 0;
+    desc->special = 0;
+    desc->command = TX_COMMAND;
+    desc->status = 0;
+    tx_next = (tx_next + 1) % TX_COUNT;
+    ++tx_pending;
+    __asm__ volatile("mfence" ::: "memory");
+    registers[E1000_TDT / 4] = tx_next;
+    (void)read_register(E1000_STATUS);
+    result = 0;
+out:
+    __asm__ volatile("pushq %0; popfq" :: "r"(flags) : "memory", "cc");
+    return result;
+}
+
+static void transmit_init(void) {
+    registers[E1000_TCTL / 4] = 0;
+    (void)read_register(E1000_STATUS);
+    uint32_t physical = pmm_alloc_frame();
+    if (!physical) goto failed;
+    tx_ring = (volatile tx_descriptor_t *)(KERNEL_DIRECT_BASE + physical);
+    kmemset((void *)tx_ring, 0, PAGE_SIZE);
+    unsigned allocated = 0;
+    for (; allocated < TX_COUNT; ++allocated) {
+        tx_buffers[allocated] = pmm_alloc_frame();
+        if (!tx_buffers[allocated]) {
+            while (allocated) pmm_free_frame(tx_buffers[--allocated]);
+            pmm_free_frame(physical);
+            tx_ring = 0;
+            goto failed;
+        }
+        tx_ring[allocated].address = tx_buffers[allocated];
+        tx_ring[allocated].status = TX_DONE;
+    }
+    registers[E1000_TDBAL / 4] = physical;
+    registers[E1000_TDBAH / 4] = 0;
+    registers[E1000_TDLEN / 4] = TX_COUNT * sizeof(tx_descriptor_t);
+    registers[E1000_TDH / 4] = 0;
+    registers[E1000_TDT / 4] = 0;
+    /* Copper 82540EM: IPGT=10, IPGR1=8, IPGR2=6; CT=15, COLD=64. */
+    registers[E1000_TIPG / 4] = 10U | (8U << 10) | (6U << 20);
+    __asm__ volatile("mfence" ::: "memory");
+    registers[E1000_TCTL / 4] = (1U << 1) | (1U << 3) | (15U << 4) | (64U << 12);
+    (void)read_register(E1000_STATUS);
+    tx_ready = 1;
+    kprintf("E1000: TX ready, %u descriptors (polling)\n", TX_COUNT);
+    /* Experimental EtherType: harmless broadcast proves the DMA path at boot. */
+    uint8_t probe[60] = {255,255,255,255,255,255,6,7,6,7,6,7,0x88,0xb5};
+    kmemcpy(probe + 14, "ZenOS TX probe", 14);
+    if (e1000_transmit(probe, sizeof(probe)) == 0)
+        kprintf("E1000: TX probe queued\n");
+#ifdef E1000_TX_STRESS
+    /* Test-only traffic exercises DD reclamation and multiple ring wraps. */
+    unsigned sent = 1;
+    for (unsigned attempts = 0; sent < 70 && attempts < 10000000; ++attempts) {
+        probe[28] = sent;
+        if (e1000_transmit(probe, sizeof(probe)) == 0) ++sent;
+        else __asm__ volatile("pause");
+    }
+    unsigned attempts = 0;
+    while (tx_pending && attempts++ < 10000000) {
+        transmit_reclaim();
+        __asm__ volatile("pause");
+    }
+    kprintf("E1000: TX stress %s\n", sent == 70 && !tx_pending ? "PASS" : "FAIL");
+#endif
+    return;
+failed:
+    kprintf("E1000: TX allocation failed\n");
 }
 
 static void receive_init(void) {
@@ -107,6 +231,7 @@ failed:
 }
 
 void e1000_poll(void) {
+    if (tx_ready) transmit_reclaim();
     if (!rx_ready) return;
     /* Bound time spent in the timer interrupt, even under continuous traffic. */
     for (unsigned budget = 0; budget < 4; ++budget) {
@@ -195,4 +320,5 @@ void e1000_init(void) {
     kprintf("E1000: MAC=%s link=%s STATUS=0x%x\n", mac,
             (status & E1000_STATUS_LU) ? "up" : "down", status);
     receive_init();
+    transmit_init();
 }
