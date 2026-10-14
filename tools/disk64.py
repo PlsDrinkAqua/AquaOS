@@ -34,7 +34,7 @@ def create(output):
                 commands.append(f'write {quote(program)} {quote("/bin/" + program.name)}')
         for entry in sorted(tree.rglob('*'), key=lambda p:(len(p.parts),str(p))):
             target = '/' + entry.relative_to(tree).as_posix()
-            if entry.is_file() and entry.stat().st_size > (12 + 1024) * 4096:
+            if entry.is_file() and entry.stat().st_size > (12 + 1024 + 1024**2 + 1024**3) * 4096:
                 raise RuntimeError(f'File exceeds filesystem capacity: {entry}')
             commands.append(f'mkdir {quote(target)}' if entry.is_dir()
                             else f'write {quote(entry)} {quote(target)}')

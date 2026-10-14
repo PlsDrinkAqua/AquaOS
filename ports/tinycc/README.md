@@ -72,9 +72,10 @@ signal-mask-saving sigsetjmp.
 - There is no wall-clock ABI. Compiler search paths have configured defaults;
   environment lookups use AquaOS libc. `__DATE__` expands to `Jan  1 1970` and
   `__TIME__` to `00:00:00`. `-bench` is rejected.
-- Use 4 KiB ext2 blocks: runtime archives exceed the 268 KiB file capacity of
-  1 KiB images. Single-indirect file limits still apply (4,243,456 bytes at 4 KiB).
-- This uses the existing 256 KiB user stack and 64 MiB managed-memory ceiling.
+- Development images use 4 KiB ext2 blocks. The filesystem also supports
+  1 KiB blocks, with double/triple indirection and 64-bit file offsets; runtime
+  archives are no longer limited to the old single-indirect capacity.
+- This uses the existing 256 KiB user stack and a physical-address ceiling of 64 GiB.
   Large projects and deeply nested inputs have not been characterized.
 - Libc remains a subset: no wide I/O, full math library, full locale support,
   or complete POSIX compatibility. The math classification macros currently

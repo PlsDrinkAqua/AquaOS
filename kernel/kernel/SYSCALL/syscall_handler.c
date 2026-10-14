@@ -321,7 +321,7 @@ void syscall_handler(interrupt_frame_t *regs)
 
         case SYS_LSEEK:
             regs->eax = (uintptr_t)fd_seek((int)regs->ebx,
-                                          (int32_t)regs->ecx,
+                                          (int64_t)regs->ecx,
                                           (int)regs->edx);
             break;
 

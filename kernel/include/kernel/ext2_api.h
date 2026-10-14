@@ -6,7 +6,7 @@
 
 typedef struct {
     uint32_t ino;
-    uint32_t pos;
+    uint64_t pos;
     uint64_t size;
     struct ext2_inode inode;
     int used;
@@ -47,7 +47,7 @@ size_t ext2_file_size(const ext2_file_t *file);
 int ext2_file_is_dir(const ext2_file_t *file);
 int ext2_file_read(ext2_file_t *file, void *buf, size_t count);
 int ext2_file_write(ext2_file_t *file, const void *buf, size_t count, int append);
-int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence);
+int64_t ext2_file_seek(ext2_file_t *file, int64_t offset, int whence);
 int ext2_file_read_dir(ext2_file_t *file, char *name, size_t name_size);
 
 #endif

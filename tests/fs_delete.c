@@ -48,7 +48,7 @@ int main(void) {
     ERROR(rmdir("///"), EBUSY);
     ERROR(rmdir("/."), EINVAL);
     ERROR(rmdir("/.."), EINVAL);
-    ERROR(unlink("/fscheck-oversized"), EFBIG);
+    CHECK(unlink("/fscheck-oversized") == 0);
     ERROR(unlink("/fscheck-symlink"), EPERM);
     int linked = open("/fscheck-link-a", O_RDWR | O_APPEND);
     CHECK(linked >= 0 && unlink("/fscheck-link-a") == 0);

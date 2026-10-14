@@ -117,3 +117,5 @@ int ext2_read_block(uint32_t block_no, void *buf);
 int ext2_write_block(uint32_t block_no, const void *buf);
 
 #endif
+
+int ext2_enable_large_files(void);

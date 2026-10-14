@@ -41,7 +41,9 @@ int zt_write(int fd, const void *p, size_t n) {
     if (written > 0 && zt_budget > 0) zt_budget -= written;
     return written;
 }
-int zt_lseek(int fd, int offset, int whence) { return result(lseek(fd, offset, whence)); }
+int64_t zt_lseek(int fd, int64_t offset, int whence) {
+    off_t n=lseek(fd,offset,whence); if(n<0) zt_errno=errno; return n;
+}
 int zt_fcntl(int fd, int command, ...) {
     int flags = 0;
     if (command == F_SETFL) { va_list a; va_start(a, command); flags = va_arg(a, int); va_end(a); }
@@ -176,6 +178,8 @@ int zt_rmdir(const char *p) { return result(rmdir(p)); }
             assert (a, actual.value) == (b, expected.value), (text, fmt)
     path = str(work / "data").encode()
     f = fopen(path, b"w+b"); assert f
+    assert fseek(f, 5*1024**3, 0) == 0 and ftell(f) == 5*1024**3
+    assert fseek(f, 0, 0) == 0
     assert fwrite(b"abcdefg", 1, 7, f) == 7 and ftell(f) == 7
     assert fseek(f, 0, 0) == 0 and fgetc(f) == ord('a')
     assert ungetc(ord('Z'), f) == ord('Z') and ftell(f) == 0

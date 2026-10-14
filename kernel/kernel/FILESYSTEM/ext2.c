@@ -333,3 +333,12 @@ int ext2_write_block(uint32_t block_no, const void *buf) {
     uint32_t secs = ext2_sectors_per_block();
     return ata_write_sectors(block_no * secs, secs, buf) == secs ? 0 : -1;
 }
+
+/* Persist LARGE_FILE before an inode's size grows beyond signed 32-bit. */
+int ext2_enable_large_files(void) {
+    if (sb.s_rev_level < 1) return -1;
+    if (sb.s_feature_ro_compat & 2U) return 0;
+    sb.s_feature_ro_compat |= 2U;
+    if (write_sb() < 0) { sb.s_feature_ro_compat &= ~2U; return -1; }
+    return 0;
+}

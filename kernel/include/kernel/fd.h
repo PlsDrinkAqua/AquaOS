@@ -30,7 +30,7 @@ int fd_dup2(int oldfd, int newfd);
 int fd_pipe(int pipefd[2]);
 int fd_read(int fd, void *buf, size_t count);
 int fd_write(int fd, const void *buf, size_t count);
-int fd_seek(int fd, int32_t offset, int whence);
+int64_t fd_seek(int fd, int64_t offset, int whence);
 int fd_read_dir(int fd, char *name, size_t name_size);
 
 #endif

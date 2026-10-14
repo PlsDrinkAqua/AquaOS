@@ -114,9 +114,10 @@ Unlink rejects directories with EISDIR. Rmdir rejects regular files with
 ENOTDIR, nonempty directories with ENOTEMPTY, and root, open directories, or
 any live process's working directory with EBUSY. Final `.` and `..` components
 are rejected with EINVAL. A trailing slash requires a directory. Deletion of
-special files (including symlinks), double/triple-indirect layouts, and inodes
+special files (including symlinks) and inodes
 with external attribute blocks is currently rejected before changing metadata.
-Direct and single-indirect blocks, including sparse files, are reclaimed.
+Direct, single-, double- and triple-indirect blocks, including sparse files,
+are reclaimed.
 
 Like mkdir, deletion is not journaled. A crash or disk error during metadata
 updates can require e2fsck; there is no persistent orphan recovery for files
@@ -232,7 +233,7 @@ Reads/writes loop over short transfers and return the number of complete
 items, not bytes. EOF is sticky until clearerr, successful positioning, rewind,
 or ungetc; read errors set the separate error flag. One byte of pushback is
 supported. Seeking accounts for that byte, clears EOF on success, and fails on
-pipes. Positions remain limited by AquaOS's signed 32-bit lseek API. Callers must
+pipes. Positions use AquaOS's signed 64-bit lseek API. Callers must
 check fwrite/ferror/fclose results; unbuffered output cannot defer an error to
 fflush. Use valid streams and valid buffer pointers. There is no setvbuf,
 freopen, wide-character I/O, or thread synchronization yet.
@@ -325,8 +326,9 @@ on the disposable disk. They compile and execute a greeting, multi-file and
 object-file programs; verify varargs, 64-bit arithmetic, floating-point parsing
 and formatting, and setjmp/longjmp (including longjmp's zero-to-one rule); then
 exercise bad syntax, missing headers and output-open failure before another
-successful compilation. The regular smoke suite runs afterward. A 4 KiB ext2
-image is required because the runtime archives exceed 1 KiB-block file limits.
+successful compilation. The regular smoke suite runs afterward. The native compiler test setup
+uses 4 KiB ext2 images; the former single-indirect file-size restriction
+no longer applies.
 
 `python3 ports/tinycc/make_disk.py` creates a separate development
 disk at `disk/zenos-dev.img` with `/usr/bin/tcc`, headers, libraries and `/home/user/hello.c`; boot
@@ -405,3 +407,5 @@ ARP validation and retry host checks are documented in [networking](../docs/NETW
 IPv4/ICMP boot ping checks and the host validation command are documented in [networking](../docs/NETWORKING.md#ipv4icmp-boot-ping).
 
 `python3 tests/high_memory.py` validates allocations, page tables, fork and NIC DMA above 4 GiB on a 5 GiB QEMU guest. See [high physical memory validation](../docs/X86_64.md#high-physical-memory-validation).
+
+Large-file host and QEMU tests are documented in [large files](../docs/LARGE_FILES.md).

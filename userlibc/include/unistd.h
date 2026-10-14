@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 typedef int ssize_t;
-typedef int off_t;
+typedef int64_t off_t;
 
 #define O_RDONLY 0
 #define O_WRONLY 1

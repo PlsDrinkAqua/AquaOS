@@ -262,8 +262,8 @@ int fd_write(int fd, const void *buf, size_t count) {
     return result;
 }
 
-int fd_seek(int fd, int32_t offset, int whence) {
-    fd_entry_t *e = fd_get(fd); int result;
+int64_t fd_seek(int fd, int64_t offset, int whence) {
+    fd_entry_t *e = fd_get(fd); int64_t result;
     if (!e) return -K_EBADF;
     if (e->type != FD_EXT2 || !e->open) return -K_ESPIPE;
     task_preemption_disable(); result = ext2_file_seek(&e->open->object.ext2, offset, whence); task_preemption_enable();

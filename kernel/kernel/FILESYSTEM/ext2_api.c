@@ -34,71 +34,98 @@ static void inode_set_size(struct ext2_inode *inode, uint64_t size) {
     inode->i_size_hi = (inode->i_mode & EXT2_S_IFMT) == EXT2_S_IFREG ? (uint32_t)(size >> 32) : 0;
 }
 
-static int inode_block(const struct ext2_inode *inode, uint32_t index, uint32_t *out) {
-    uint32_t bs = block_size(), pointers = bs / sizeof(uint32_t);
-    uint32_t *indirect;
-    if (!out) return -K_EINVAL;
-    if (index < 12) { *out = inode->i_block[index]; return 0; }
-    index -= 12;
-    if (index >= pointers) return -K_EFBIG;
-    if (!inode->i_block[12]) { *out = 0; return 0; }
-    indirect = kmalloc(bs);
-    if (!indirect) return -K_ENOMEM;
-    if (ext2_read_block(inode->i_block[12], indirect) < 0) { kfree(indirect); return -K_EIO; }
-    *out = indirect[index]; kfree(indirect); return 0;
+/* Logical block paths: 12 direct, then single/double/triple indirection. */
+static uint64_t maximum_file_size(void) {
+    uint64_t n = block_size() / 4;
+    return (12 + n + n*n + n*n*n) * block_size();
 }
-
-static int inode_ensure_block(struct ext2_inode *inode, uint32_t index, uint32_t *out) {
-    uint32_t bs = block_size(), pointers = bs / sizeof(uint32_t), allocated;
-    uint32_t *indirect;
-    if (index < 12) {
-        if (!inode->i_block[index]) {
-            if (ext2_alloc_block(&allocated) < 0) return -K_ENOSPC;
-            inode->i_block[index] = allocated;
-            inode->i_blocks += bs / 512;
+static int block_path(uint64_t index, unsigned *root, unsigned path[3], unsigned *depth) {
+    uint64_t n = block_size() / 4, span = n;
+    if (index < 12) { *root = index; *depth = 0; return 0; }
+    index -= 12;
+    for (unsigned level=1;level<=3;level++,span*=n) {
+        if (index < span) {
+            *root = 11 + level; *depth = level;
+            for (unsigned i=level;i;i--) { path[i-1]=index % n; index/=n; }
+            return 0;
         }
-        *out = inode->i_block[index]; return 0;
+        index -= span;
     }
-    index -= 12;
-    if (index >= pointers) return -K_EFBIG;
-    if (!inode->i_block[12]) {
-        if (ext2_alloc_block(&allocated) < 0) return -K_ENOSPC;
-        inode->i_block[12] = allocated;
-        inode->i_blocks += bs / 512;
-    }
-    indirect = kmalloc(bs);
-    if (!indirect) return -K_ENOMEM;
-    if (ext2_read_block(inode->i_block[12], indirect) < 0) { kfree(indirect); return -K_EIO; }
-    if (!indirect[index]) {
-        if (ext2_alloc_block(&allocated) < 0) { kfree(indirect); return -K_ENOSPC; }
-        indirect[index] = allocated;
-        inode->i_blocks += bs / 512;
-        if (ext2_write_block(inode->i_block[12], indirect) < 0) { kfree(indirect); return -K_EIO; }
-    }
-    *out = indirect[index]; kfree(indirect); return 0;
+    return -K_EFBIG;
 }
-
+static int inode_block(const struct ext2_inode *inode, uint64_t index, uint32_t *out) {
+    unsigned root, path[3], depth;
+    int result=block_path(index,&root,path,&depth);
+    if (result) return result;
+    uint32_t block=inode->i_block[root];
+    uint32_t *p=depth ? kmalloc(block_size()) : 0;
+    if (depth && !p) return -K_ENOMEM;
+    for (unsigned i=0;i<depth && block;i++) {
+        if(ext2_read_block(block,p)<0) { kfree(p); return -K_EIO; }
+        block=p[path[i]];
+    }
+    kfree(p); *out=block; return 0;
+}
+static int inode_ensure_block(struct ext2_inode *inode, uint64_t index, uint32_t *out) {
+    unsigned root,path[3],depth;
+    int result=block_path(index,&root,path,&depth);
+    if(result) return result;
+    uint32_t block=inode->i_block[root], parent=0;
+    unsigned missing=0;
+    uint32_t *p=kmalloc(block_size());
+    if(!p) return -K_ENOMEM;
+    for (;missing<depth && block;missing++) {
+        parent=block;
+        if(ext2_read_block(block,p)<0) { result=-K_EIO; goto done; }
+        block=p[path[missing]];
+    }
+    if(block) { *out=block; result=0; goto done; }
+    /* Build the entire missing subtree privately before publishing its root. */
+    unsigned count=depth-missing+1, allocated=0;
+    uint32_t fresh[4];
+    if(inode->i_blocks > UINT32_MAX-count*(block_size()/512)) { result=-K_EFBIG; goto done; }
+    for(;allocated<count;allocated++) {
+        if(ext2_alloc_block(&fresh[allocated])<0) { result=-K_ENOSPC; goto rollback; }
+    }
+    for(unsigned i=0;i+1<count;i++) {
+        kmemset(p,0,block_size()); p[path[missing+i]]=fresh[i+1];
+        if(ext2_write_block(fresh[i],p)<0) { result=-K_EIO; goto rollback; }
+    }
+    if(parent) {
+        if(ext2_read_block(parent,p)<0) { result=-K_EIO; goto rollback; }
+        p[path[missing-1]]=fresh[0];
+        if(ext2_write_block(parent,p)<0) { result=-K_EIO; goto rollback; }
+    } else inode->i_block[root]=fresh[0];
+    inode->i_blocks += count*(block_size()/512);
+    *out=fresh[count-1]; result=0; goto done;
+rollback:
+    while(allocated) ext2_free_block(fresh[--allocated]);
+done:
+    kfree(p); return result;
+}
+static int free_tree(uint32_t block, unsigned depth) {
+    if(!block) return 0;
+    if(depth) {
+        uint32_t *p=kmalloc(block_size());
+        if(!p) return -K_ENOMEM;
+        if(ext2_read_block(block,p)<0) { kfree(p); return -K_EIO; }
+        for(unsigned i=0;i<block_size()/4;i++) if(p[i]) {
+            int result=free_tree(p[i],depth-1);
+            if(result) { kfree(p); return result; }
+        }
+        kfree(p);
+    }
+    return ext2_free_block(block)<0 ? -K_EIO : 0;
+}
 static int inode_truncate(uint32_t ino, struct ext2_inode *inode) {
-    uint32_t bs = block_size(), *indirect;
-    /* Do not partially free layouts this driver cannot traverse. */
-    if (inode->i_block[13] || inode->i_block[14]) return -K_EFBIG;
-    if (inode->i_file_acl) return -K_ENOSYS;
-    for (int i = 0; i < 12; i++) if (inode->i_block[i]) {
-        if (ext2_free_block(inode->i_block[i]) < 0) return -K_EIO;
-        inode->i_block[i] = 0;
+    if(inode->i_file_acl) return -K_ENOSYS;
+    for(unsigned i=0;i<15;i++) if(inode->i_block[i]) {
+        int result=free_tree(inode->i_block[i],i<12?0:i-11);
+        if(result) return result;
+        inode->i_block[i]=0;
     }
-    if (inode->i_block[12]) {
-        indirect = kmalloc(bs);
-        if (!indirect) return -K_ENOMEM;
-        if (ext2_read_block(inode->i_block[12], indirect) < 0) { kfree(indirect); return -K_EIO; }
-        for (uint32_t i = 0; i < bs / sizeof(uint32_t); i++)
-            if (indirect[i] && ext2_free_block(indirect[i]) < 0) { kfree(indirect); return -K_EIO; }
-        kfree(indirect);
-        if (ext2_free_block(inode->i_block[12]) < 0) return -K_EIO;
-        inode->i_block[12] = 0;
-    }
-    inode_set_size(inode, 0); inode->i_blocks = 0;
-    return ext2_write_inode(ino, inode) < 0 ? -K_EIO : 0;
+    inode_set_size(inode,0); inode->i_blocks=0;
+    return ext2_write_inode(ino,inode)<0 ? -K_EIO : 0;
 }
 
 int ext2_init(void) {
@@ -301,7 +328,6 @@ int ext2_remove(const char *path, int directory) {
     if (!is_dir && (child.i_mode & EXT2_S_IFMT) != EXT2_S_IFREG) {
         result = -K_EPERM; goto done;
     }
-    if (child.i_block[13] || child.i_block[14]) { result = -K_EFBIG; goto done; }
     if (child.i_file_acl) { result = -K_ENOSYS; goto done; }
     if (!child.i_links_count) { result = -K_EIO; goto done; }
     if (is_dir) {
@@ -363,7 +389,6 @@ int ext2_rename(char *old_path, char *new_path) {
         if (ext2_read_inode(target_no, &target) < 0) return -K_EIO;
         if ((target.i_mode & EXT2_S_IFMT) != EXT2_S_IFREG) return -K_EPERM;
         if (!target.i_links_count) return -K_EIO;
-        if (target.i_block[13] || target.i_block[14]) return -K_EFBIG;
         if (target.i_file_acl) return -K_ENOSYS;
     }
     if (ext2_read_inode(parent_no, &parent) < 0) return -K_EIO;
@@ -543,7 +568,8 @@ int ext2_file_read(ext2_file_t *file, void *buf, size_t count) {
     if (!count) return 0;
     tmp = kmalloc(bs); if (!tmp) return -K_ENOMEM;
     while (total < count && file->pos < file->size) {
-        uint32_t block, index = file->pos / bs, offset = file->pos % bs;
+        uint32_t block, offset = file->pos % bs;
+        uint64_t index = file->pos / bs;
         size_t chunk = bs - offset;
         if (inode_block(&file->inode, index, &block) < 0) { kfree(tmp); return total ? (int)total : -K_EIO; }
         if (chunk > count - total) chunk = count - total;
@@ -563,9 +589,12 @@ int ext2_file_write(ext2_file_t *file, const void *buf, size_t count, int append
     if (ext2_file_is_dir(file)) return -K_EISDIR;
     if (append) file->pos = file->size;
     if (!count) return 0;
+    if (file->pos >= maximum_file_size() || count > maximum_file_size()-file->pos) return -K_EFBIG;
+    if (file->pos + count > INT32_MAX && ext2_enable_large_files()<0) return -K_EIO;
     tmp = kmalloc(bs); if (!tmp) return -K_ENOMEM;
     while (total < count) {
-        uint32_t block, index = file->pos / bs, offset = file->pos % bs;
+        uint32_t block, offset = file->pos % bs;
+        uint64_t index = file->pos / bs;
         size_t chunk = bs - offset; int result = inode_ensure_block(&file->inode, index, &block);
         if (result < 0) { kfree(tmp); return total ? (int)total : result; }
         if (chunk > count - total) chunk = count - total;
@@ -576,20 +605,25 @@ int ext2_file_write(ext2_file_t *file, const void *buf, size_t count, int append
         if (ext2_write_block(block, tmp) < 0) { kfree(tmp); return total ? (int)total : -K_EIO; }
         file->pos += chunk; total += chunk;
         if (file->pos > file->size) file->size = file->pos;
+        inode_set_size(&file->inode,file->size);
+        if(ext2_write_inode(file->ino,&file->inode)<0) { kfree(tmp); return -K_EIO; }
     }
     inode_set_size(&file->inode, file->size);
     if (ext2_write_inode(file->ino, &file->inode) < 0) { kfree(tmp); return total ? (int)total : -K_EIO; }
     kfree(tmp); return total;
 }
 
-int ext2_file_seek(ext2_file_t *file, int32_t offset, int whence) {
+int64_t ext2_file_seek(ext2_file_t *file, int64_t offset, int whence) {
     int64_t base, next;
     if (!file || !file->used) return -K_EBADF;
     if (file_refresh(file) < 0) return -K_EIO;
+    if (file->size > INT64_MAX) return -K_EFBIG;
     if (whence == 0) base = 0; else if (whence == 1) base = file->pos;
     else if (whence == 2) base = file->size; else return -K_EINVAL;
+    if ((offset > 0 && base > INT64_MAX-offset) ||
+        (offset < 0 && offset < -base)) return -K_EINVAL;
     next = base + offset;
-    if (next < 0 || next > 0x7fffffff) return -K_EINVAL;
+    if (next < 0) return -K_EINVAL;
     file->pos = next; return file->pos;
 }
 
@@ -600,7 +634,8 @@ int ext2_file_read_dir(ext2_file_t *file, char *name, size_t name_size) {
     if (!ext2_file_is_dir(file)) return -K_ENOTDIR;
     buf = kmalloc(bs); if (!buf) return -K_ENOMEM;
     while (file->pos < file->size) {
-        uint32_t block, index = file->pos / bs, offset = file->pos % bs;
+        uint32_t block, offset = file->pos % bs;
+        uint64_t index = file->pos / bs;
         struct ext2_dir_entry_2 *de;
         if (inode_block(&file->inode, index, &block) < 0 || !block ||
             ext2_read_block(block, buf) < 0 || offset + 8 > bs) { kfree(buf); return -K_EIO; }

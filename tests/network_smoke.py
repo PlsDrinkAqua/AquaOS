@@ -21,7 +21,7 @@ def boot(tmp, disk, label, devices, expected):
                '-object', f'filter-dump,id=capture,netdev=net0,file={capture}'] if devices else ['-nic', 'none']
     command = ['qemu-system-x86_64', '-m', os.environ.get('AQUAOS_TEST_MEMORY', '128M'), '-display', 'none', '-serial', 'none',
                '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/myos.iso'),
-               '-drive', f'file={disk},format=raw,if=ide,snapshot=on',
+               '-drive', f'file={disk},format=raw,if=ide,snapshot={'off' if os.environ.get('AQUAOS_TEST_LARGE_FILE') else 'on'}',
                '-qmp', f'unix:{monitor},server=on,wait=off', *network, *devices]
     with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
         try:
@@ -132,6 +132,8 @@ def boot(tmp, disk, label, devices, expected):
                             physical = re.search(r'pd_paddr=0x([0-9a-f]+)', output)
                             assert physical and int(physical[1], 16) >= 0x100000000, output
                             command('highmemcheck', 'high-memory fork checks passed')
+                        if os.environ.get('AQUAOS_TEST_LARGE_FILE'):
+                            command('largefilecheck', 'large-file checks passed')
                         if os.environ.get('AQUAOS_TEST_MEMCHECK'):
                             command('memcheck', 'memory reliability checks passed')
                     else:
@@ -209,6 +211,10 @@ def boot(tmp, disk, label, devices, expected):
                 for index, packet in enumerate(probes):
                     expected_frame = prefix + bytes([index if TX_STRESS else 0]) + bytes(31)
                     assert packet == expected_frame, packet.hex()
+            if devices and os.environ.get('AQUAOS_TEST_LARGE_FILE'):
+                subprocess.run(['e2fsck','-fn',str(disk)],check=True,capture_output=True)
+                contents = subprocess.check_output(['debugfs','-R','stat /large-retained',str(disk)],stderr=subprocess.DEVNULL).decode()
+                assert '5368709121' in contents, contents
             print(f'PASS: {label}')
         finally:
             if proc.poll() is None:
@@ -222,9 +228,12 @@ def main():
         disk = tmp / 'disk.img'
         with disk.open('wb') as output:
             output.truncate(32 * 1024 * 1024)
-        subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
+        subprocess.run(['mkfs.ext2', '-q', '-F', '-b', os.environ.get('AQUAOS_TEST_BLOCK_SIZE','4096'), '-O', '^large_file' if os.environ.get('AQUAOS_TEST_LARGE_FILE') else 'large_file', str(disk)], check=True)
         batch = tmp / 'install.txt'
         batch.write_text(f'mkdir /bin\nwrite {ROOT / "build/x86_64/user/shell"} /bin/shell\nwrite {ROOT / "build/x86_64/user/ping"} /bin/ping\n')
+        if os.environ.get('AQUAOS_TEST_LARGE_FILE'):
+            with batch.open('a') as install:
+                install.write(f'write {ROOT / "build/x86_64/user/largefilecheck"} /bin/largefilecheck\n')
         if os.environ.get('AQUAOS_TEST_MEMCHECK'):
             with batch.open('a') as install:
                 install.write(f'write {ROOT / "build/x86_64/user/memcheck"} /bin/memcheck\n')

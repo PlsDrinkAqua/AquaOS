@@ -114,8 +114,10 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE *f) {
 int fseek(FILE *f, long offset, int whence) {
     if (!valid(f)) return -1;
     int64_t adjusted = offset;
-    if (whence == SEEK_CUR && f->pushed != EOF) adjusted--;
-    if (adjusted < INT32_MIN || adjusted > INT32_MAX) { errno = EOVERFLOW; return -1; }
+    if (whence == SEEK_CUR && f->pushed != EOF) {
+        if (adjusted == INT64_MIN) { errno = EOVERFLOW; return -1; }
+        adjusted--;
+    }
     if (lseek(f->fd, (off_t)adjusted, whence) < 0) return -1;
     f->pushed = EOF; f->eof = 0;
     return 0;
