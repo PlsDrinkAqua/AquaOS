@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def boot(tmp, disk, label, devices, expected):
     monitor = tmp / (label + '.qmp')
     capture = tmp / (label + '.pcap')
-    network = ['-netdev', 'user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dhcpstart=10.0.2.15',
+    network = ['-netdev', 'user,id=net0,net=6.6.6.0/24,host=6.6.6.6,dhcpstart=6.6.6.15',
                '-object', f'filter-dump,id=capture,netdev=net0,file={capture}'] if devices else ['-nic', 'none']
     command = ['qemu-system-x86_64', '-m', '128M', '-display', 'none', '-serial', 'none',
                '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/myos.iso'),
@@ -59,13 +59,21 @@ def boot(tmp, disk, label, devices, expected):
                             qmp('human-monitor-command', {'command-line': 'sendkey ret'})
                         if 'fatal kernel exception' in screen:
                             raise AssertionError(screen)
-                        if ('shell at' in screen and expected in screen and
-                            (not devices or 'ARP: gateway 10.0.2.2 MAC=' in screen)):
+                        if ('shell at' in screen and (devices or expected in screen) and
+                            (not devices or 'ICMP: reply from 6.6.6.6 seq=1' in screen)):
                             break
                         time.sleep(.1)
                     else:
                         raise AssertionError(f'{label}: missing {expected!r}\n{screen}')
                     if devices:
+                        # Packet logs can scroll PCI discovery off the live VGA view.
+                        qmp('human-monitor-command', {'command-line': 'sendkey shift-pgup'})
+                        time.sleep(.2)
+                        qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                        data = dump.read_bytes()[::2]
+                        screen += '\n' + '\n'.join(data[i:i+80].decode('ascii', errors='replace')
+                                                    for i in range(0, 2000, 80))
+                        assert expected in screen, screen
                         match = re.search(r'E1000 MMIO=0x([0-9a-f]+) IRQ=(\d+) pin=(\d+) command=0x([0-9a-f]+)', screen)
                         assert match, screen
                         address, irq, pin, command_bits = (int(match[1], 16), int(match[2]), int(match[3]), int(match[4], 16))
@@ -91,6 +99,36 @@ def boot(tmp, disk, label, devices, expected):
                         assert nic, inventory
                         bar0 = next(region for region in nic['regions'] if region['bar'] == 0)
                         assert address == bar0['address'] and irq == nic['irq'], (match.groups(), nic)
+                    # Exercise the installed command through shell exec and syscalls.
+                    def command(line, expected_output):
+                        for character in line:
+                            key = {' ': 'spc', '.': 'dot', '-': 'minus'}.get(character, character)
+                            qmp('human-monitor-command', {'command-line': 'sendkey ' + key})
+                            time.sleep(.08)
+                        qmp('human-monitor-command', {'command-line': 'sendkey ret'})
+                        end = time.monotonic() + 12
+                        while time.monotonic() < end:
+                            qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                            data = dump.read_bytes()[::2]
+                            output = '\n'.join(data[i:i+80].decode('ascii', errors='replace')
+                                               for i in range(0, 2000, 80))
+                            if expected_output in output:
+                                time.sleep(.2)
+                                return
+                            time.sleep(.1)
+                        raise AssertionError(output)
+                    if devices:
+                        qmp('human-monitor-command', {'command-line': 'sendkey shift-pgdn'})
+                        time.sleep(.2)
+                        command('ping -c 2 6.6.6.6', '2 transmitted, 2 received')
+                        command('ping -c 1 6.6.6.6', '1 transmitted, 1 received')
+                        command('ping 6.6.6.3', 'only gateway 6.6.6.6 is supported')
+                        command('ping -c 100 6.6.6.6', 'PING 6.6.6.6: 100 requests')
+                        qmp('human-monitor-command', {'command-line': 'sendkey ctrl-c'})
+                        time.sleep(.3)
+                        command('ping -c 3 6.6.6.6', '3 transmitted, 3 received')
+                    else:
+                        command('ping', 'ping: cannot send')
                     qmp('quit')
             proc.wait(timeout=5)
             if devices:
@@ -110,7 +148,7 @@ def boot(tmp, disk, label, devices, expected):
                     packets.append(capture_data[offset:offset + captured])
                     offset += captured
                 guest_mac = bytes.fromhex('060706070607')
-                guest_ip, gateway_ip = bytes([10,0,2,15]), bytes([10,0,2,2])
+                guest_ip, gateway_ip = bytes([6,6,6,15]), bytes([6,6,6,6])
                 requests = [p for p in packets if len(p) >= 42 and
                             p[12:22] == bytes.fromhex('08060001080006040001') and p[6:12] == guest_mac]
                 assert requests, 'No ARP request captured'
@@ -126,7 +164,38 @@ def boot(tmp, disk, label, devices, expected):
                 assert reply[:6] == guest_mac and reply[32:38] == guest_mac
                 assert reply[6:12] == reply[22:28]
                 learned = ':'.join(f'{byte:02x}' for byte in reply[22:28])
-                assert f'ARP: gateway 10.0.2.2 MAC={learned}' in screen, screen
+                assert f'ARP: gateway 6.6.6.6 MAC={learned}' in screen, screen
+                def internet_checksum(data):
+                    if len(data) % 2:
+                        data += b'\0'
+                    total = sum(struct.unpack('!' + 'H' * (len(data)//2), data))
+                    while total >> 16:
+                        total = (total & 0xffff) + (total >> 16)
+                    return (~total) & 0xffff
+
+                echoes = []
+                for packet in packets:
+                    if len(packet) < 34 or packet[12:14] != b'\x08\x00':
+                        continue
+                    ip = packet[14:]
+                    ihl = (ip[0] & 15) * 4
+                    total = int.from_bytes(ip[2:4], 'big')
+                    if ip[9] != 1:
+                        continue
+                    assert ip[0] >> 4 == 4 and 20 <= ihl <= total <= len(ip)
+                    assert internet_checksum(ip[:ihl]) == 0
+                    icmp = ip[ihl:total]
+                    assert len(icmp) == 19 and internet_checksum(icmp) == 0
+                    assert icmp[1] == 0 and icmp[4:6] == bytes.fromhex('a901') and 1 <= int.from_bytes(icmp[6:8], 'big') <= 8
+                    assert icmp[8:] == b'AquaOS ping'
+                    if icmp[0] == 8:
+                        assert ip[12:16] == guest_ip and ip[16:20] == gateway_ip
+                        assert packet[:6] == reply[22:28] and packet[6:12] == guest_mac
+                    else:
+                        assert icmp[0] == 0 and ip[12:16] == gateway_ip and ip[16:20] == guest_ip
+                        assert packet[:6] == guest_mac
+                    echoes.append(icmp[0])
+                assert echoes == [8, 0] * 8, echoes
                 prefix = bytes.fromhex('ffffffffffff06070607060788b5') + b'AquaOS TX test'
                 probes = [packet for packet in packets if packet.startswith(prefix)]
                 assert len(probes) == (70 if TX_STRESS else 1), probes
@@ -148,7 +217,7 @@ def main():
             output.truncate(32 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
         batch = tmp / 'install.txt'
-        batch.write_text(f'mkdir /bin\nwrite {ROOT / "build/x86_64/user/shell"} /bin/shell\n')
+        batch.write_text(f'mkdir /bin\nwrite {ROOT / "build/x86_64/user/shell"} /bin/shell\nwrite {ROOT / "build/x86_64/user/ping"} /bin/ping\n')
         subprocess.run(['debugfs', '-w', '-f', str(batch), str(disk)], check=True, capture_output=True)
         boot(tmp, disk, 'e1000', ['-device', 'e1000,netdev=net0,mac=52:54:00:12:34:56'], '8086:100e class=2:0')
         boot(tmp, disk, 'bridge', ['-device', 'pci-bridge,id=bridge,chassis_nr=1', '-device',

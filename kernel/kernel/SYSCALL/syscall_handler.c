@@ -1,4 +1,6 @@
 #include <stdint.h>
+#include <kernel/net.h>
+#include <kernel/timer.h>
 #include <libk/stdio.h>
 #include <libk/string.h>
 #include <kernel/elf.h>
@@ -42,6 +44,8 @@ enum {
     SYS_RENAME  = 26,
     SYS_FCNTL   = 27,
     SYS_TERMINAL_CONTROL = 28,
+    SYS_PING_START = 29,
+    SYS_PING_RESULT = 30,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -177,6 +181,14 @@ void syscall_handler(interrupt_frame_t *regs)
 
         case SYS_TERMINAL_CONTROL:
             regs->eax = (uintptr_t)task_terminal_control(regs->ebx);
+            break;
+
+        case SYS_PING_START:
+            regs->eax = regs->ebx > UINT32_MAX ? (uintptr_t)-K_EINVAL :
+                (uintptr_t)net_ping_start(task_current()->pid, regs->ebx, timer_ticks());
+            break;
+        case SYS_PING_RESULT:
+            regs->eax = (uintptr_t)net_ping_result(task_current()->pid);
             break;
 
         case SYS_CLEAR:

@@ -12,6 +12,6 @@ printf 'Guest disk retained at %s/dev.img\n' "$zenos64_work"
 printf 'Packet capture retained at %s/network.pcap\n' "$zenos64_work"
 exec qemu-system-x86_64 -m 128M -cdrom build/x86_64/myos.iso \
     -drive "file=$zenos64_work/dev.img,format=raw,if=ide" \
-    -netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dhcpstart=10.0.2.15 \
+    -netdev user,id=net0,net=6.6.6.0/24,host=6.6.6.6,dhcpstart=6.6.6.15 \
     -device e1000,netdev=net0,mac=52:54:00:12:34:56 \
     -object "filter-dump,id=netcapture,netdev=net0,file=$zenos64_work/network.pcap" "$@"

@@ -32,6 +32,8 @@ enum {
     SYS_RENAME  = 26,
     SYS_FCNTL   = 27,
     SYS_TERMINAL_CONTROL = 28,
+    SYS_PING_START = 29,
+    SYS_PING_RESULT = 30,
 };
 
 #ifdef __cplusplus

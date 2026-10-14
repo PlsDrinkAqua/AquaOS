@@ -48,7 +48,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                      "set_inode_field /fscheck-link-a links_count 2",
                      f"write {oversized} /fscheck-oversized",
                      "symlink /fscheck-symlink /hello.txt"]
-        programs = ["shell", "hello", "cat", "cp", "mv", "ls", "echo", "mkdir", "rm", "rmdir", "fscheck", "memcheck", "kilo", "libccheck", "stdiocheck", "intcheck"]
+        programs = ["shell", "hello", "cat", "cp", "mv", "ls", "echo", "mkdir", "rm", "rmdir", "ping", "fscheck", "memcheck", "kilo", "libccheck", "stdiocheck", "intcheck"]
         if arch == "x86_64": programs.append("abi64check")
         commands += [f"write {user_dir / name} /bin/{name}" for name in programs]
         commands += ["mkdir /path-a", "mkdir /path-b",

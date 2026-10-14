@@ -11,6 +11,7 @@
 #include <kernel/kmalloc.h>
 #include <kernel/pmm.h>
 #include <kernel/task.h>
+#include <kernel/net.h>
 #include <kernel/timer.h>
 #include <kernel/tss.h>
 #include <kernel/usercopy.h>
@@ -947,6 +948,7 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
     exiting->job_cancelled = 0;
     fd_table_close_all(exiting);
     exiting->state = TASK_EXITED;
+    net_ping_cancel(exiting->pid);
     exiting->exit_status = status;
     exiting->waiting_for_pid = 0;
     exiting->wake_tick = 0;

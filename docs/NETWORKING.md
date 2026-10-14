@@ -3,16 +3,16 @@
 AquaOS provides PCI discovery and a polling E1000 driver with receive and
 transmit DMA rings. It sends one diagnostic Ethernet broadcast at boot.
 ARP resolves the static gateway and answers requests for the guest IP.
-IPv4 packet handling, DHCP and ping are not implemented yet.
+A single IPv4/ICMP boot ping verifies the gateway path after ARP resolves.
+A userspace `ping` command can repeat gateway probes; DHCP is not implemented.
 
 ## Development network
 
 Run `sh qemu.sh`. The launcher creates one E1000 (Intel 82540EM, PCI
 8086:100e) with MAC `52:54:00:12:34:56`, attached to QEMU user networking.
-It explicitly sets the subnet to `10.0.2.0/24`, host/gateway to `10.0.2.2`,
-and first DHCP lease to `10.0.2.15`. QEMU's default DNS proxy is `10.0.2.3`.
-For the future static-IP milestone, use `10.0.2.15/24` with that gateway and DNS.
-The guest now uses static IP `10.0.2.15/24` and resolves gateway `10.0.2.2`.
+It explicitly sets the subnet to `6.6.6.0/24`, host/gateway to `6.6.6.6`,
+and first DHCP lease to `6.6.6.15`. The subnet's QEMU DNS proxy is `6.6.6.3`.
+The guest now uses static IP `6.6.6.15/24` and resolves gateway `6.6.6.6`.
 DNS is not yet used.
 
 Each launch retains `network.pcap` beside `dev.img` under its new
@@ -28,7 +28,7 @@ See [QEMU network and capture options](https://www.qemu.org/docs/master/system/i
 When invoking QEMU directly, use the same network arguments:
 
 ```sh
--netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dhcpstart=10.0.2.15 \
+-netdev user,id=net0,net=6.6.6.0/24,host=6.6.6.6,dhcpstart=6.6.6.15 \
 -device e1000,netdev=net0,mac=52:54:00:12:34:56 \
 -object filter-dump,id=netcapture,netdev=net0,file=network.pcap
 ```
@@ -103,10 +103,10 @@ builds stopped. Guest development disks are untouched.
 
 `kernel/kernel/NET/net.c` handles Ethernet/IPv4 ARP using the wire format in
 [RFC 826](https://www.rfc-editor.org/rfc/rfc826). After both DMA rings initialize,
-it broadcasts an ARP request for `10.0.2.2`, using static sender IP `10.0.2.15`
+it broadcasts an ARP request for `6.6.6.6`, using static sender IP `6.6.6.15`
 and the station MAC read back from the NIC. Timer polling retries at one-second
 intervals (the current PIT runs at 100 Hz), with at most three attempts.
-Resolution stops retries and prints `ARP: gateway 10.0.2.2 MAC=...`.
+Resolution stops retries and prints `ARP: gateway 6.6.6.6 MAC=...`.
 
 The driver passes complete, error-free RX frames to `net_receive()` before
 recycling DMA buffers. The handler checks frame size, Ethernet destination,
@@ -119,7 +119,7 @@ by the network handler. All network state access currently requires interrupts
 disabled on the single CPU; received buffer pointers are never retained.
 
 This is a static, single-interface milestone: no general ARP table, expiry,
-address conflict detection, VLAN support, DHCP or IP routing implementation.
+address conflict detection, VLAN support, DHCP or general IP routing.
 A full TX queue can drop an ARP reply; bounded gateway retries cover lost
 requests without blocking the timer. ARP does not authenticate peer identities.
 
@@ -134,3 +134,65 @@ cc -Wall -Wextra -Werror -fsanitize=address,undefined \
   tests/arp_host.c kernel/kernel/NET/net.c -o /tmp/zenos-arp-host
 /tmp/zenos-arp-host
 ```
+
+## IPv4/ICMP boot ping
+
+After ARP resolution, the next timer poll sends one ICMP Echo Request to
+`6.6.6.6`, with identifier `0xa901`, sequence 1 and payload `AquaOS ping`.
+The IPv4 header uses TTL 64 and Don't Fragment; both IPv4 and ICMP checksums
+are computed over network-order bytes, including an odd final payload byte.
+Wire formats follow [RFC 791](https://www.rfc-editor.org/rfc/rfc791.txt) and
+[RFC 792](https://www.rfc-editor.org/rfc/rfc792.txt).
+
+Successful reception prints `ICMP: reply from 6.6.6.6 seq=1`. With no matching
+reply within 300 ticks (three seconds at the current 100 Hz PIT), it prints a
+timeout. TX submission failure is reported separately and terminates the probe.
+The shell continues running throughout; there is no blocking wait or allocation
+in this path. If ARP never resolves, no Echo Request is sent.
+
+The receive path checks Ethernet addresses, IPv4 version, header length, total
+length, header checksum, TTL, protocol and endpoint addresses. Fragmented packets
+and the reserved flag are rejected; DF is accepted. Echo replies must match the
+identifier, sequence, payload length and contents, and ICMP checksum. Ethernet
+padding is excluded using IPv4 total length. Duplicates and late replies are
+ignored. Options count toward header length/checksum but are not interpreted.
+This is one fixed gateway probe, without ICMP error handling, incoming Echo
+Request responses, fragment reassembly, or a socket API.
+
+`python3 tests/network_smoke.py` verifies the request/reply in the PCAP and the
+guest success message for all three PCI layouts, plus boot without a NIC.
+The host validation test exercises malformed frames, padding, checksum failures,
+wrong reply identity, timer wraparound, late replies and TX failure:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include tests/icmp_host.c -o /tmp/aquaos-icmp-host
+/tmp/aquaos-icmp-host
+```
+
+## Shell ping command
+
+Fresh development disks include `/bin/ping`. Run:
+
+```sh
+ping
+ping 6.6.6.6
+ping -c 2 6.6.6.6
+```
+
+The default is four requests, with one-second pauses between completed probes.
+`-c` accepts 1–100; Ctrl+C stops the command. Each request has a three-second
+timeout. Output includes sequence numbers, approximate RTT in milliseconds
+(10 ms timer resolution), and transmitted/received counts. Exit status is 0
+when all requests receive replies, 1 on send failure or packet loss, and 2 for
+invalid arguments or unsupported destinations. Only `6.6.6.6` is supported;
+there is no DNS lookup or general destination routing yet.
+
+Syscalls 29/30 back `zenos_ping_start()` and `zenos_ping_result()` in
+`<zenos/net.h>`. Start queues one request; result reports EAGAIN while waiting,
+then returns RTT or ETIMEDOUT and consumes the result. The caller sleeps between
+polls. One process owns the active probe; other callers get EBUSY at start and
+EPERM when reading another process's result. Process exit (including Ctrl+C)
+cancels ownership. Wire sequence numbers change between requests to reject
+stale replies. Existing development images need the rebuilt `/bin/ping` copied
+in while QEMU is stopped, or use `sh qemu.sh` for a fresh image.

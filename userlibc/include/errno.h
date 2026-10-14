@@ -32,5 +32,6 @@ extern int errno;
 #define ENOSYS  38
 #define ENOTEMPTY 39
 #define EOVERFLOW 75
+#define ETIMEDOUT 110
 
 #endif

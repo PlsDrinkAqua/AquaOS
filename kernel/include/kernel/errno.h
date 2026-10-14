@@ -27,6 +27,7 @@
 #define K_ENOSPC  28
 #define K_EMLINK 31
 #define K_EPIPE   32
+#define K_ETIMEDOUT 110
 #define K_ENOSYS  38
 #define K_ENOTEMPTY 39
 
