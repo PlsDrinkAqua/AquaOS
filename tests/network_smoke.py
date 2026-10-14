@@ -127,7 +127,7 @@ def boot(tmp, disk, label, devices, expected):
                 assert reply[6:12] == reply[22:28]
                 learned = ':'.join(f'{byte:02x}' for byte in reply[22:28])
                 assert f'ARP: gateway 10.0.2.2 MAC={learned}' in screen, screen
-                prefix = bytes.fromhex('ffffffffffff06070607060788b5') + b'ZenOS TX probe'
+                prefix = bytes.fromhex('ffffffffffff06070607060788b5') + b'AquaOS TX test'
                 probes = [packet for packet in packets if packet.startswith(prefix)]
                 assert len(probes) == (70 if TX_STRESS else 1), probes
                 for index, packet in enumerate(probes):

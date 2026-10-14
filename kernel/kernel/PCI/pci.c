@@ -5,7 +5,7 @@
 static pci_device_t network_device;
 static int have_network;
 
-/* ZenOS is single CPU: preserve IF around the shared CF8/CFC transaction. */
+/* AquaOS is single CPU: preserve IF around the shared CF8/CFC transaction. */
 static uintptr_t config_lock(void) {
     uintptr_t flags;
     __asm__ volatile ("pushfq; popq %0; cli" : "=r"(flags) : : "memory");

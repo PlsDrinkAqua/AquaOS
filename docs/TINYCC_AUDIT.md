@@ -1,12 +1,12 @@
 # TinyCC integration
 
-ZenOS builds pinned TinyCC 0.9.27 revision
+AquaOS builds pinned TinyCC 0.9.27 revision
 `d348a9a51d32cece842b7885d27a411436d7887b` for native x86-64 static ELF64 output.
-The port uses ZenOS libc, startup code, syscall ABI, and x86-64 runtime helpers.
+The port uses AquaOS libc, startup code, syscall ABI, and x86-64 runtime helpers.
 It supports compilation to files and native compiler self-rebuilding.
 
 `ports/tinycc/build.py` verifies the source archive hash and applies checked
-patches to the pinned source. Patches configure static linking, ZenOS compiler
+patches to the pinned source. Patches configure static linking, AquaOS compiler
 paths and macros, libc startup/runtime selection, static PLT32/GOT relocation,
 and output-error cleanup. Timing, cross-target dispatch, shared libraries, and
 in-memory execution remain disabled.

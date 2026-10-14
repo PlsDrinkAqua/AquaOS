@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build pinned TinyCC for ZenOS; output a disk-installable tree in root/."""
+"""Build pinned TinyCC for AquaOS; output a disk-installable tree in root/."""
 from pathlib import Path
 import argparse
 import hashlib
@@ -43,17 +43,17 @@ def replace(file, old, new):
 replace('tcc.h', '#include <time.h>', '')
 replace('tcc.h', '# include <sys/time.h>', '')
 replace('tcc.h', '#if defined _WIN32 == defined TCC_TARGET_PE', '#if !defined(__zenos__) && (defined _WIN32 == defined TCC_TARGET_PE)')
-replace('tcc.c', '    struct timeval tv;\n    gettimeofday(&tv, NULL);\n    return tv.tv_sec*1000 + (tv.tv_usec+500)/1000;', '    return 0; /* No compiler timing until ZenOS has a clock API. */')
+replace('tcc.c', '    struct timeval tv;\n    gettimeofday(&tv, NULL);\n    return tv.tv_sec*1000 + (tv.tv_usec+500)/1000;', '    return 0; /* No compiler timing until AquaOS has a clock API. */')
 p = source / 'tccpp.c'; s = p.read_text(); a = s.index('        time_t ti;'); b = s.index('        cstrval = buf;', a)
 s = s[:a] + '        strcpy(buf, tok == TOK___DATE__ ? "Jan  1 1970" : "00:00:00");\n' + s[b:]; p.write_text(s)
 p = source / 'tcctools.c'; s = p.read_text(); a = s.index('    char program[4096];', s.index('ST_FUNC void tcc_tool_cross')); b = s.index('\n}', a)
-s = s[:a] + '    (void)s; (void)argv; (void)target;\n    tcc_error("ZenOS compiler supports only its native target");' + s[b:]; p.write_text(s)
-replace('libtcc.c', '            s->do_bench = 1;', '            tcc_error("compiler timing is not available on ZenOS");')
-replace('libtcc.c', '    s->output_type = output_type;', '    if (output_type == TCC_OUTPUT_DLL || output_type == TCC_OUTPUT_MEMORY)\n        tcc_error("ZenOS supports compile-to-file only");\n    s->output_type = output_type;')
+s = s[:a] + '    (void)s; (void)argv; (void)target;\n    tcc_error("AquaOS compiler supports only its native target");' + s[b:]; p.write_text(s)
+replace('libtcc.c', '            s->do_bench = 1;', '            tcc_error("compiler timing is not available on AquaOS");')
+replace('libtcc.c', '    s->output_type = output_type;', '    if (output_type == TCC_OUTPUT_DLL || output_type == TCC_OUTPUT_MEMORY)\n        tcc_error("AquaOS supports compile-to-file only");\n    s->output_type = output_type;')
 replace('libtcc.c', '    s->alacarte_link = 1;', '    s->static_link = 1;\n    s->alacarte_link = 1;')
 replace('libtcc.c', '    tcc_define_symbol(s, "__STDC__", NULL);', '    tcc_define_symbol(s, "__zenos__", "1");\n    tcc_define_symbol(s, "__STDC__", NULL);')
 replace('libtcc.c', '            tcc_add_crt(s, "crt1.o");\n        tcc_add_crt(s, "crti.o");', '            tcc_add_crt(s, "crt0.o");')
-replace('tccelf.c', '        if (s1->output_type != TCC_OUTPUT_MEMORY)\n            tcc_add_crt(s1, "crtn.o");', '        tcc_add_library_err(s1, "gcc"); /* GCC-built ZenOS libc helpers. */')
+replace('tccelf.c', '        if (s1->output_type != TCC_OUTPUT_MEMORY)\n            tcc_add_crt(s1, "crtn.o");', '        tcc_add_library_err(s1, "gcc"); /* GCC-built AquaOS libc helpers. */')
 # Modern GCC emits PLT32 for external calls, including static objects.
 # Resolve locally defined symbols directly; this pinned TCC otherwise
 # builds a dynamic PLT that its static output path never relocates.

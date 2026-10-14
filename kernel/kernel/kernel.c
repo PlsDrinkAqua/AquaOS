@@ -30,7 +30,7 @@ int debug = 4;
 
 void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
     terminal_initialize();
-    kprintf("ZenOS x86-64: long mode, LP64 userspace\n");
+    kprintf("AquaOS x86-64: long mode, LP64 userspace\n");
 
     kprintf("Initilizing GDT.................");
 	gdt_install();

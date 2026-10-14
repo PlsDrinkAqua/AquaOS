@@ -1,6 +1,6 @@
-# ZenOS
+# AquaOS
 
-ZenOS is an x86-64 operating system with LP64 userspace, a shell, a text editor,
+AquaOS is an x86-64 operating system with LP64 userspace, a shell, a text editor,
 a writable ext2 filesystem, and a native TinyCC compiler. x86-64 is the only
 supported architecture.
 

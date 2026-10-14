@@ -166,7 +166,7 @@ static void transmit_init(void) {
     kprintf("E1000: TX ready, %u descriptors (polling)\n", TX_COUNT);
     /* Experimental EtherType: harmless broadcast proves the DMA path at boot. */
     uint8_t probe[60] = {255,255,255,255,255,255,6,7,6,7,6,7,0x88,0xb5};
-    kmemcpy(probe + 14, "ZenOS TX probe", 14);
+    kmemcpy(probe + 14, "AquaOS TX test", 14);
     if (e1000_transmit(probe, sizeof(probe)) == 0)
         kprintf("E1000: TX probe queued\n");
 #ifdef E1000_TX_STRESS

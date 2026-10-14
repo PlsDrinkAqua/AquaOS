@@ -1,6 +1,6 @@
 # Networking foundations
 
-ZenOS provides PCI discovery and a polling E1000 driver with receive and
+AquaOS provides PCI discovery and a polling E1000 driver with receive and
 transmit DMA rings. It sends one diagnostic Ethernet broadcast at boot.
 ARP resolves the static gateway and answers requests for the guest IP.
 IPv4 packet handling, DHCP and ping are not implemented yet.
@@ -19,7 +19,7 @@ Each launch retains `network.pcap` beside `dev.img` under its new
 `disk/zenos64.*` directory and prints both paths. Open the capture in Wireshark
 or inspect it with `tcpdump -nn -r disk/zenos64.XXXXXX/network.pcap`.
 Expect a 60-byte broadcast with experimental EtherType 0x88b5 and payload
-`ZenOS TX probe`, sourced from the programmed station MAC `06:07:06:07:06:07`.
+`AquaOS TX test`, sourced from the programmed station MAC `06:07:06:07:06:07`.
 The user backend requires no TAP device or root privileges. Future guest
 connections can use its outbound NAT; arbitrary inbound connections require
 explicit forwarding. Host-to-guest ping is not a suitable test of this backend.

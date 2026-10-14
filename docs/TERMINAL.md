@@ -19,13 +19,13 @@ each), with consecutive duplicates omitted. Down past the newest entry restores
 the unfinished draft and its cursor. History lasts for the process lifetime.
 Ctrl+C cancels without adding history; Enter submits the entire line.
 
-The editor uses ZenOS-specific `CSI 1;N~` / `CSI 2;N~` output sequences to move
+The editor uses AquaOS-specific `CSI 1;N~` / `CSI 2;N~` output sequences to move
 backward/forward by N cells across wrapped rows without erasing text. These are
 terminal extensions, not standard ANSI cursor movement. A reverse-video block follows
 the editing position and is hidden while viewing scrollback.
 The block swaps the cell's foreground/background on screen only; moving it
 restores the original character and colours. The hardware underline is disabled.
-Navigation moves only the cursor. Text edits use ZenOS `CSI 3~` / `CSI 4~`
+Navigation moves only the cursor. Text edits use AquaOS `CSI 3~` / `CSI 4~`
 begin/end redraw sequences: intermediate changes stay in the terminal backing
 buffer until the completed line and final cursor position are ready to display.
 

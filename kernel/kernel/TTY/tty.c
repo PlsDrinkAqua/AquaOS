@@ -126,7 +126,7 @@ static int terminal_escape(unsigned char c) {
         terminal_row = row < VGA_HEIGHT ? row : VGA_HEIGHT - 1;
         terminal_column = col < VGA_WIDTH ? col : VGA_WIDTH - 1;
     } else if (c == '~' && (escape_arg[0] == 1 || escape_arg[0] == 2)) {
-        /* ZenOS linear movement: CSI 1;cells~ back, CSI 2;cells~ forward. */
+        /* AquaOS linear movement: CSI 1;cells~ back, CSI 2;cells~ forward. */
         size_t pos = terminal_row * VGA_WIDTH + terminal_column;
         size_t amount = escape_arg[1];
         if (escape_arg[0] == 1) pos = amount > pos ? 0 : pos - amount;

@@ -50,7 +50,7 @@ These features also work at the interactive prompt.
 
 Scripts stop at the first nonzero command/list status, report the script path
 and line number, and return that status to their parent. This includes a failed
-command before `&&`: ZenOS scripts always stop on failure, unlike the conditional
+command before `&&`: AquaOS scripts always stop on failure, unlike the conditional
 exceptions in POSIX `set -e`. A pipeline uses the last stage's exit status;
 a pipe/fork/wait setup failure also causes failure. There is no `pipefail` option.
 Syntax errors return 2, launch/lookup failures return 127, and Ctrl+C termination

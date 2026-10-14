@@ -1,8 +1,8 @@
-# TinyCC on ZenOS
+# TinyCC on AquaOS
 
 This port builds TinyCC 0.9.27 (`d348a9a51d32cece842b7885d27a411436d7887b`)
-with the existing x86-64 ELF toolchain. The resulting `/usr/bin/tcc` runs on ZenOS and
-compiles/links static x86-64 ELF executables using ZenOS startup code and libc.
+with the existing x86-64 ELF toolchain. The resulting `/usr/bin/tcc` runs on AquaOS and
+compiles/links static x86-64 ELF executables using AquaOS startup code and libc.
 It does not use Linux syscalls. The first build downloads the pinned archive;
 subsequent builds use its SHA-256-verified cache.
 
@@ -31,7 +31,7 @@ The host build needs Python 3.12+ and GCC/binutils; boot/testing
 also needs QEMU and the usual GRUB ISO build dependencies. `ZENOS64_CC` and
 `ZENOS64_AR` can override the cross compiler and archiver commands.
 
-Inside ZenOS:
+Inside AquaOS:
 
 ```sh
 cd /home/user
@@ -51,7 +51,7 @@ inputs can be linked. `-nostdlib` retains its normal opt-out meaning.
 
 `build.py` applies explicit, checked substitutions to a fresh pinned source
 extraction. A mismatched patch fails the build. The patched sources remain in
-`build/x86_64/tinycc-build/` for inspection. Output in `build/x86_64/root/` contains `/usr/bin/tcc`, ZenOS headers,
+`build/x86_64/tinycc-build/` for inspection. Output in `build/x86_64/root/` contains `/usr/bin/tcc`, AquaOS headers,
 TinyCC's stdarg/stdbool/float headers, `crt0.o`, `libc.a`, `libtcc1.a`, the matching
 cross-toolchain `libgcc.a`, and example/regression sources. TinyCC's license is
 installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
@@ -59,7 +59,7 @@ installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
 The compiler links `crt0.o` automatically and defaults to static linking. Its
 support runtime handles compiler-generated operations; libgcc supplies helpers
 used by GCC-built libc. `__zenos__` is predefined, with no Linux target macro.
-ZenOS libc supplies x86-64 setjmp/longjmp; jumping with zero returns one, and
+AquaOS libc supplies x86-64 setjmp/longjmp; jumping with zero returns one, and
 callee-saved registers and the caller stack are restored. Ordinary C rules for
 volatile locals and the lifetime of the target stack frame apply. This is not
 signal-mask-saving sigsetjmp.
@@ -70,7 +70,7 @@ signal-mask-saving sigsetjmp.
   checking, or backtraces. Shared/memory output and cross-target
   dispatch are rejected. Native compiler self-rebuilding is tested below.
 - There is no wall-clock ABI. Compiler search paths have configured defaults;
-  environment lookups use ZenOS libc. `__DATE__` expands to `Jan  1 1970` and
+  environment lookups use AquaOS libc. `__DATE__` expands to `Jan  1 1970` and
   `__TIME__` to `00:00:00`. `-bench` is rejected.
 - Use 4 KiB ext2 blocks: runtime archives exceed the 268 KiB file capacity of
   1 KiB images. Single-indirect file limits still apply (4,243,456 bytes at 4 KiB).
@@ -89,7 +89,7 @@ nonlocal jumps. Bad syntax, missing headers, and an unwritable output path must
 fail; another compilation must then succeed. Existing shell, filesystem,
 allocator and stdio regressions run afterward, with offline ext2 validation.
 
-## Rebuilding TinyCC inside ZenOS
+## Rebuilding TinyCC inside AquaOS
 
 The staged tree now includes the exact patched compiler sources and generated
 `config.h` at `/home/user/tinycc`, plus the existing utility source `echo.c`
@@ -98,7 +98,7 @@ header and definition files and COPYING; it is sufficient for the configured
 x86-64 single-translation-unit build, not an upstream build-system installation.
 The host and native builds use the same patched inputs.
 
-Inside ZenOS, the complete compiler rebuild and test is now automated:
+Inside AquaOS, the complete compiler rebuild and test is now automated:
 
 ```sh
 cd /home/user/tinycc

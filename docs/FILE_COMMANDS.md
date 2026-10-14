@@ -1,6 +1,6 @@
 # Copying and moving files
 
-ZenOS installs `cp` and `mv` in `/bin`.
+AquaOS installs `cp` and `mv` in `/bin`.
 
 ```sh
 cp hello.c backup.c
@@ -36,7 +36,7 @@ links, ownership, permissions, timestamps, or sparse allocation. Ordinary copies
 also create a new inode with default file permissions. Same-directory renames
 preserve the source inode. Filesystem mutations are not journaled.
 
-The temporary suffix needs space within ZenOS's 255-byte path limit. A very long
+The temporary suffix needs space within AquaOS's 255-byte path limit. A very long
 destination path can therefore fail even if a direct open would accept it.
 
 Verification:

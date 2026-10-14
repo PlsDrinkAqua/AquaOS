@@ -34,7 +34,7 @@
 
 #define KILO_VERSION "0.0.1"
 
-/* ZenOS port: see ports/kilo/README.md for upstream provenance. */
+/* AquaOS port: see ports/kilo/README.md for upstream provenance. */
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -63,7 +63,7 @@ static void *kilo_realloc(void *old, size_t size) {
 #define malloc kilo_malloc
 #define realloc kilo_realloc
 
-/* Dynamic line reader for ZenOS stdio. Reject binary input and bound loading. */
+/* Dynamic line reader for AquaOS stdio. Reject binary input and bound loading. */
 static int kilo_getline(char **line, size_t *capacity, FILE *fp) {
     size_t length = 0;
     int c;
@@ -227,7 +227,7 @@ struct editorSyntax HLDB[] = {
 
 /* ======================= Low level terminal handling ====================== */
 
-/* ZenOS terminal reads already deliver individual bytes without echo.
+/* AquaOS terminal reads already deliver individual bytes without echo.
  * Arrow/home/end/delete keys are single-byte events, not escape sequences. */
 int enableRawMode(int fd) { (void)fd; return 0; }
 int editorReadKey(int fd) {
@@ -868,7 +868,7 @@ void editorRefreshScreen(void) {
         }
         abAppend(&ab,"\x1b[39m",5);
         abAppend(&ab,"\x1b[0K",4);
-        /* ZenOS newline already returns to column zero. CR is a glyph. */
+        /* AquaOS newline already returns to column zero. CR is a glyph. */
         abAppend(&ab,"\n",1);
     }
 
@@ -1226,7 +1226,7 @@ void initEditor(void) {
     E.filename = NULL;
     E.syntax = NULL;
     updateWindowSize();
-    /* The ZenOS VGA terminal has fixed dimensions. */
+    /* The AquaOS VGA terminal has fixed dimensions. */
 }
 
 int main(int argc, char **argv) {

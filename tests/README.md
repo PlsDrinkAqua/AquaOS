@@ -77,7 +77,7 @@ echo hello > note.txt
 ls
 ```
 
-This is a ZenOS one-argument API: new directories use mode 0755. The command
+This is a AquaOS one-argument API: new directories use mode 0755. The command
 accepts path arguments only; option parsing and recursive parent creation
 (`-p`) are not implemented. Parents must exist. Existing files/directories
 return EEXIST, missing parents return ENOENT, and non-directory parents return
@@ -232,7 +232,7 @@ Reads/writes loop over short transfers and return the number of complete
 items, not bytes. EOF is sticky until clearerr, successful positioning, rewind,
 or ungetc; read errors set the separate error flag. One byte of pushback is
 supported. Seeking accounts for that byte, clears EOF on success, and fails on
-pipes. Positions remain limited by ZenOS's signed 32-bit lseek API. Callers must
+pipes. Positions remain limited by AquaOS's signed 32-bit lseek API. Callers must
 check fwrite/ferror/fclose results; unbuffered output cannot defer an error to
 fflush. Use valid streams and valid buffer pointers. There is no setvbuf,
 freopen, wide-character I/O, or thread synchronization yet.
@@ -290,7 +290,7 @@ including `ldexp`. It is not a complete mathematical library.
 
 Floating formatting/parsing adapts musl's MIT-licensed conversion algorithms;
 see `userlibc/licenses/README.md` for provenance and the retained license.
-ZenOS now initializes x87/SSE and saves/restores their state per task. fork
+AquaOS now initializes x87/SSE and saves/restores their state per task. fork
 inherits the state; exec/spawn start with the default environment. The kernel
 requires an x86 CPU with FXSR and SSE (the default QEMU CPU supports these).
 Kernel C code must remain free of floating-point/SSE calculations. Each process
@@ -347,7 +347,7 @@ on subsequent syscalls, including while init waits for a nested shell.
 At a shell prompt Ctrl+C discards queued input and the current input line, prints
 `^C`, and shows another prompt. Ctrl+D keeps its existing EOF behavior. Nested
 shells claim the terminal and restore their parent's ownership on exit. Terminal
-reads outside the foreground group return EIO. This is a single-terminal ZenOS
+reads outside the foreground group return EIO. This is a single-terminal AquaOS
 API (`zenos_terminal_claim/begin_job/end_job`), without POSIX signal handlers,
 kill, background jobs, or stop/resume support. A command executing kernel code
 must finish that operation before termination can be delivered.
@@ -373,7 +373,7 @@ python3 tests/shell_smoke.py --block-size 4096 --selfhost
 This adds two generations of native TinyCC builds, tests each generated compiler,
 and compares their executable bytes after shutdown. It implies `--tinycc` and
 uses a disposable disk; add `--layout-only` to omit the broader regressions.
-See `ports/tinycc/README.md` for commands to rebuild manually inside ZenOS.
+See `ports/tinycc/README.md` for commands to rebuild manually inside AquaOS.
 
 Shell script checks run as part of the smoke suite: comments, blank lines, CRLF,
 final lines without a newline, indentation, pipelines/redirection, `&&` success

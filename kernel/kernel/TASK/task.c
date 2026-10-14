@@ -43,7 +43,7 @@ static void fpu_init(void) {
     uintptr_t cr;
     __asm__ volatile ("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
     if ((d & ((1U << 24) | (1U << 25))) != ((1U << 24) | (1U << 25))) {
-        kprintf("ZenOS requires FXSR and SSE for floating-point contexts\n");
+        kprintf("AquaOS requires FXSR and SSE for floating-point contexts\n");
         for (;;) __asm__ volatile ("cli; hlt");
     }
     __asm__ volatile ("mov %%cr0, %0" : "=r"(cr));

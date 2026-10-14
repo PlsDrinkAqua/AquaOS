@@ -7,7 +7,7 @@
 #include <limits.h>
 #include <float.h>
 #ifndef __zenos__
-#error Missing ZenOS target macro
+#error Missing AquaOS target macro
 #endif
 #define CHECK(x) do { if (!(x)) { printf("FAIL native line %d\n", __LINE__); return 1; } } while (0)
 static jmp_buf env;

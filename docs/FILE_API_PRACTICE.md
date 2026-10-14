@@ -1,4 +1,4 @@
-# File API practice on ZenOS
+# File API practice on AquaOS
 
 Work through these exercises in order. Each has a concrete pass condition; write
 the programs yourself using the API notes below. The examples teach the building
@@ -11,7 +11,7 @@ Write ordinary user programs in C. Include `<unistd.h>`, `<stdio.h>`, and
 reach its file descriptor layer and ext2 driver. Kernel-internal `ext2_*`
 functions are not the API to call from these programs.
 
-Inside your existing ZenOS development environment:
+Inside your existing AquaOS development environment:
 
 ```sh
 cd /home/user
@@ -25,7 +25,7 @@ tcc create.c -o create
 Create the directory once. Type directly in Kilo; Ctrl+S saves and Ctrl+Q
 quits. Compile again after each edit. Use a different output name from the source
 file. See [the editor guide](../ports/kilo/README.md) for details.
-These commands run inside ZenOS; the workbook itself lives in the host repository.
+These commands run inside AquaOS; the workbook itself lives in the host repository.
 The compiler setup is documented in [the TinyCC guide](../ports/tinycc/README.md).
 
 ## Your practice list
@@ -38,7 +38,7 @@ The compiler setup is documented in [the TinyCC guide](../ports/tinycc/README.md
 | 4 | `count`: count bytes and newline characters | `read` | After step 1 and two appends, reports 27 bytes and 3 newlines. An empty file gives 0 and 0. |
 | 5 | `patch`: modify a file at a byte offset | `lseek`, `O_RDWR` | Starting with `abcdef`, overwrite offset 2 with `XY`; result is `abXYef`, still 6 bytes. |
 | 6 | `copy`: copy a source to a new destination | Read loop, write loop, `O_EXCL` | Exact contents for empty and multi-buffer files; an existing destination is refused and preserved. |
-| 7 | `list`: print names in a directory | `open`, ZenOS `readdir`, `close` | Lists your practice files; passing an ordinary file reports an error. |
+| 7 | `list`: print names in a directory | `open`, AquaOS `readdir`, `close` | Lists your practice files; passing an ordinary file reports an error. |
 | 8 | `cleanup`: create and remove a scratch directory and file | `mkdir`, `unlink`, `rmdir` | Removing a nonempty directory fails; removing its file first lets directory removal succeed. |
 | 9 | Final test: `filetool` | All previous skills | Meets the final test below. |
 
@@ -72,7 +72,7 @@ current directory; `/home/user/practice/example.txt` is an absolute path.
 
 Choose exactly one access mode, then combine additional flags using bitwise OR
 (`|`). Opening an existing file for writing alone does not empty it.
-ZenOS currently ignores the optional permission argument to `open`, so these
+AquaOS currently ignores the optional permission argument to `open`, so these
 examples use two arguments. Your constants are available through `<unistd.h>`;
 `<fcntl.h>` also includes them.
 
@@ -176,7 +176,7 @@ After measuring a file with `SEEK_END`, seek back before trying to read it.
 
 ## 5. Directories and deletion
 
-ZenOS has its own directory API; it does not use the POSIX `DIR *` interface:
+AquaOS has its own directory API; it does not use the POSIX `DIR *` interface:
 
 ```c
 int fd = open(".", O_RDONLY);
@@ -194,7 +194,7 @@ include `.` and `..`; you can skip them using `strcmp` from `<string.h>`.
 Names are relative to the directory you opened, not necessarily your process's
 current directory. Listing order is unspecified.
 
-`mkdir("scratch")` creates a directory. ZenOS takes one argument here.
+`mkdir("scratch")` creates a directory. AquaOS takes one argument here.
 `unlink("scratch/data.txt")` removes a file's name.
 `rmdir("scratch")` removes an empty directory. Each returns 0 on success or -1
 on error. Close directory descriptors and leave a directory before removing it.

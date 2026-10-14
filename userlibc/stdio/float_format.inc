@@ -1,6 +1,6 @@
 /* Adapted from musl src/stdio/vfprintf.c, retrieved 2026-09-13.
  * Copyright 2005-2020 Rich Felker et al.; MIT license in licenses/musl-COPYRIGHT.
- * Adaptation: ZenOS output sink and helpers; numeric algorithm retained. */
+ * Adaptation: AquaOS output sink and helpers; numeric algorithm retained. */
 #include <float.h>
 #include <math.h>
 #define MAX(a,b) ((a)>(b)?(a):(b))

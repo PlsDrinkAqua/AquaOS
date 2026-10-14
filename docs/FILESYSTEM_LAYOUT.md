@@ -1,6 +1,6 @@
 # Filesystem Layout
 
-The installed ZenOS filesystem uses these directories:
+The installed AquaOS filesystem uses these directories:
 
 | Directory | Contents |
 | --- | --- |

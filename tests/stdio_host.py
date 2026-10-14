@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run actual ZenOS stdio against host descriptors and injected I/O failures."""
+"""Run actual AquaOS stdio against host descriptors and injected I/O failures."""
 import ctypes as C
 from pathlib import Path
 import subprocess

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit a pinned tiny Vim against ZenOS; does not install or patch Vim."""
+"""Audit a pinned tiny Vim against AquaOS; does not install or patch Vim."""
 from pathlib import Path
 import hashlib
 import json
@@ -48,7 +48,7 @@ command = ['sh', 'configure', '--build=x86_64-pc-linux-gnu', '--host=x86_64-unkn
            '--disable-channel', '--disable-netbeans',
            '--disable-selinux', '--disable-smack', '--disable-xsmp',
            'CC=' + str(wrapper), 'vim_cv_toupper_broken=no',
-           'vim_cv_uname_output=ZenOS', 'vim_cv_uname_r_output=0', 'vim_cv_getcwd_broken=no']
+           'vim_cv_uname_output=AquaOS', 'vim_cv_uname_r_output=0', 'vim_cv_getcwd_broken=no']
 (BUILD / 'configure-command.txt').write_text(shlex.join(command) + '\n')
 with (BUILD / 'configure.log').open('w') as log:
     configured = subprocess.run(command, cwd=source, stdout=log, stderr=subprocess.STDOUT)

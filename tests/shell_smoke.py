@@ -27,7 +27,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             f.truncate(100 * 1024 * 1024)
         subprocess.run(["mkfs.ext2", "-q", "-F", "-b", str(block_size), str(disk)], check=True)
         hello = tmp / "hello.txt"
-        hello.write_text("hello, ZenOS\n")
+        hello.write_text("hello, AquaOS\n")
         bar = tmp / "bar.dat"
         bar.write_text("foo\n")
         commands = ["mkdir /bin", "mkdir /subdir", "mkdir /etc",
@@ -189,46 +189,46 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("notexec", "shell: cannot execute /path-a/notexec")
                 command("/bin/echo $?", "\n126\n", clear_screen=False, allow_exec_error=True)
                 command("unset PATH")
-                command("cat /hello.txt", "hello, ZenOS")
+                command("cat /hello.txt", "hello, AquaOS")
                 command("export PATH=/bin:/usr/bin:/")
                 command("cd /")
                 print("PASS: PATH order, inheritance, relative/empty entries and explicit paths", flush=True)
 
             def check_file_ops():
                 command("cp /hello.txt /copied.txt", "exited from /bin/cp with status 0")
-                command("cat /copied.txt", "hello, ZenOS")
+                command("cat /copied.txt", "hello, AquaOS")
                 command("cp /hello.txt /subdir", "exited from /bin/cp with status 0")
-                command("cat /subdir/hello.txt", "hello, ZenOS")
+                command("cat /subdir/hello.txt", "hello, AquaOS")
                 command("cp /hello.txt /./hello.txt", "exited from /bin/cp with status 1")
-                command("cat /hello.txt", "hello, ZenOS")
+                command("cat /hello.txt", "hello, AquaOS")
                 command("cp /missing /copied.txt", "exited from /bin/cp with status 1")
                 command("cp /subdir /copied.txt", "exited from /bin/cp with status 1")
-                command("cat /copied.txt", "hello, ZenOS")
+                command("cat /copied.txt", "hello, AquaOS")
                 command("cp /history.txt /copy-large", "exited from /bin/cp with status 0")
                 command("cp /hello.txt /copied.txt", "exited from /bin/cp with status 0")
                 command("mv /copied.txt /renamed-long-filename.txt", "exited from /bin/mv with status 0")
-                command("cat /renamed-long-filename.txt", "hello, ZenOS")
+                command("cat /renamed-long-filename.txt", "hello, AquaOS")
                 command("mv /renamed-long-filename.txt /subdir", "exited from /bin/mv with status 0")
-                command("cat /subdir/renamed-long-filename.txt", "hello, ZenOS")
+                command("cat /subdir/renamed-long-filename.txt", "hello, AquaOS")
                 command("mv /subdir/renamed-long-filename.txt /subdir/bar.dat", "exited from /bin/mv with status 0")
-                command("cat /subdir/bar.dat", "hello, ZenOS")
+                command("cat /subdir/bar.dat", "hello, AquaOS")
                 command("mv /subdir/bar.dat /subdir/bar.dat", "exited from /bin/mv with status 0")
                 command("mv /hello.txt /missing-dir/result", "exited from /bin/mv with status 1")
-                command("cat /hello.txt", "hello, ZenOS")
+                command("cat /hello.txt", "hello, AquaOS")
                 command("cp /subdir/bar.dat /moved-copy", "exited from /bin/cp with status 0")
                 command("mkdir /file-op-batch")
                 command("cp /hello.txt /moved-copy /file-op-batch", "exited from /bin/cp with status 0")
-                command("cat /file-op-batch/hello.txt", "hello, ZenOS")
+                command("cat /file-op-batch/hello.txt", "hello, AquaOS")
                 command("mv /file-op-batch/hello.txt /file-op-batch/moved-copy /subdir", "exited from /bin/mv with status 0")
-                command("cat /subdir/moved-copy", "hello, ZenOS")
+                command("cat /subdir/moved-copy", "hello, AquaOS")
                 # Restore the fixture used later by the broader shell checks.
                 command("echo foo > /subdir/bar.dat")
                 print("PASS: cp and mv files, directories, replacement and errors", flush=True)
 
             def check_kilo():
                 command("kilo /hello.txt", "Ctrl-S = save")
-                text = wait_for("hello, ZenOS")
-                assert text.splitlines()[0] == "hello, ZenOS", text
+                text = wait_for("hello, AquaOS")
+                assert text.splitlines()[0] == "hello, AquaOS", text
                 assert all("\r" not in line for line in text.split("\n")), text
                 visual_keys(["ctrl-q"])
                 wait_for("exited from /bin/kilo with status 0")
@@ -302,8 +302,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 qmp("quit")
                 proc.wait(timeout=5)
                 subprocess.run(["e2fsck", "-fn", str(disk)], check=True)
-                for path, expected in [("/moved-copy", "hello, ZenOS\n"),
-                                       ("/hello.txt", "hello, ZenOS\n"),
+                for path, expected in [("/moved-copy", "hello, AquaOS\n"),
+                                       ("/hello.txt", "hello, AquaOS\n"),
                                        ("/copy-large", history.read_text())]:
                     saved = subprocess.run(["debugfs", "-R", "cat " + path, str(disk)],
                                            text=True, capture_output=True, check=True)
@@ -430,7 +430,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 command("ls /bin", "shell\n")
                 assert "\ncat\n" not in listing and "\nshell\n" not in listing
                 command("echo lookup works", "\nlookup works\n")
-                command("/bin/cat /hello.txt", "hello, ZenOS")
+                command("/bin/cat /hello.txt", "hello, AquaOS")
                 command("cd /subdir")
                 command("../bin/cat bar.dat", "\nfoo\n")
                 command("shell", "shell at")
@@ -573,12 +573,12 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             command("echo saved > note")
             command("cat note", "\nsaved\n")
             command("cd /")
-            command("/bin/cat /hello.txt", "hello, ZenOS")
+            command("/bin/cat /hello.txt", "hello, AquaOS")
             command("/bin/echo hello world | /bin/cat > /copy.txt")
             command("cat < /copy.txt", "\nhello world\n")
             command("echo again >> /copy.txt")
             command("cat /copy.txt", "\nhello world\nagain\n")
-            command("cat /hello.txt /copy.txt", "\nhello, ZenOS\nhello world\nagain\n")
+            command("cat /hello.txt /copy.txt", "\nhello, AquaOS\nhello world\nagain\n")
             command("cd /subdir")
             command("pwd", "\n/subdir\n")
             listing = command("ls", "\nbar.dat\n")
@@ -628,7 +628,7 @@ if __name__ == "__main__":
     parser.add_argument("--tinycc", action="store_true", help="exercise the staged native TinyCC port")
     parser.add_argument("--scrollback-only", action="store_true", help="exercise terminal scrollback keys")
     parser.add_argument("--layout-only", action="store_true", help="exercise installed paths and shell restart")
-    parser.add_argument("--selfhost", action="store_true", help="rebuild TinyCC twice inside ZenOS and test both compilers (implies --tinycc)")
+    parser.add_argument("--selfhost", action="store_true", help="rebuild TinyCC twice inside AquaOS and test both compilers (implies --tinycc)")
     parser.add_argument("--arch", choices=["x86_64"], default="x86_64")
     parser.add_argument("--compiler-only", action="store_true")
     parser.add_argument("--kilo-only", action="store_true", help="exercise Kilo and offline disk integrity")
