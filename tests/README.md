@@ -403,3 +403,5 @@ the kernel and ISO. See [networking foundations](../docs/NETWORKING.md).
 ARP validation and retry host checks are documented in [networking](../docs/NETWORKING.md#arp-gateway-resolution). The QEMU network smoke suite also checks gateway resolution against captured ARP packets.
 
 IPv4/ICMP boot ping checks and the host validation command are documented in [networking](../docs/NETWORKING.md#ipv4icmp-boot-ping).
+
+`python3 tests/high_memory.py` validates allocations, page tables, fork and NIC DMA above 4 GiB on a 5 GiB QEMU guest. See [high physical memory validation](../docs/X86_64.md#high-physical-memory-validation).

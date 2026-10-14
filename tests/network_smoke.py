@@ -19,7 +19,7 @@ def boot(tmp, disk, label, devices, expected):
     capture = tmp / (label + '.pcap')
     network = ['-netdev', 'user,id=net0,net=6.6.6.0/24,host=6.6.6.6,dhcpstart=6.6.6.15',
                '-object', f'filter-dump,id=capture,netdev=net0,file={capture}'] if devices else ['-nic', 'none']
-    command = ['qemu-system-x86_64', '-m', '128M', '-display', 'none', '-serial', 'none',
+    command = ['qemu-system-x86_64', '-m', os.environ.get('AQUAOS_TEST_MEMORY', '128M'), '-display', 'none', '-serial', 'none',
                '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/myos.iso'),
                '-drive', f'file={disk},format=raw,if=ide,snapshot=on',
                '-qmp', f'unix:{monitor},server=on,wait=off', *network, *devices]
@@ -114,7 +114,7 @@ def boot(tmp, disk, label, devices, expected):
                                                for i in range(0, 2000, 80))
                             if expected_output in output:
                                 time.sleep(.2)
-                                return
+                                return output
                             time.sleep(.1)
                         raise AssertionError(output)
                     if devices:
@@ -127,6 +127,13 @@ def boot(tmp, disk, label, devices, expected):
                         qmp('human-monitor-command', {'command-line': 'sendkey ctrl-c'})
                         time.sleep(.3)
                         command('ping -c 3 6.6.6.6', '3 transmitted, 3 received')
+                        if os.environ.get('AQUAOS_TEST_HIGH_RAM'):
+                            output = command('taskinfo', 'pd_paddr=')
+                            physical = re.search(r'pd_paddr=0x([0-9a-f]+)', output)
+                            assert physical and int(physical[1], 16) >= 0x100000000, output
+                            command('highmemcheck', 'high-memory fork checks passed')
+                        if os.environ.get('AQUAOS_TEST_MEMCHECK'):
+                            command('memcheck', 'memory reliability checks passed')
                     else:
                         command('ping', 'ping: cannot send')
                     qmp('quit')
@@ -218,6 +225,12 @@ def main():
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
         batch = tmp / 'install.txt'
         batch.write_text(f'mkdir /bin\nwrite {ROOT / "build/x86_64/user/shell"} /bin/shell\nwrite {ROOT / "build/x86_64/user/ping"} /bin/ping\n')
+        if os.environ.get('AQUAOS_TEST_MEMCHECK'):
+            with batch.open('a') as install:
+                install.write(f'write {ROOT / "build/x86_64/user/memcheck"} /bin/memcheck\n')
+        if os.environ.get('AQUAOS_TEST_HIGH_RAM'):
+            with batch.open('a') as install:
+                install.write(f'write {ROOT / "build/x86_64/user/highmemcheck"} /bin/highmemcheck\n')
         subprocess.run(['debugfs', '-w', '-f', str(batch), str(disk)], check=True, capture_output=True)
         boot(tmp, disk, 'e1000', ['-device', 'e1000,netdev=net0,mac=52:54:00:12:34:56'], '8086:100e class=2:0')
         boot(tmp, disk, 'bridge', ['-device', 'pci-bridge,id=bridge,chassis_nr=1', '-device',

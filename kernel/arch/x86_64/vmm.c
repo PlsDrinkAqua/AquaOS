@@ -8,7 +8,7 @@
 extern page_directory_t boot_page_directory;
 static page_directory_t *current;
 static uint64_t *table(uint64_t entry) { return (void *)(KERNEL_DIRECT_BASE+(entry&ADDRESS)); }
-static uintptr_t physical(const void *p) { return (uintptr_t)p-KERNEL_DIRECT_BASE; }
+static uintptr_t physical(const void *p) { return (uintptr_t)p >= KERNEL_LINK_BASE ? (uintptr_t)p-KERNEL_LINK_BASE : (uintptr_t)p-KERNEL_DIRECT_BASE; }
 static void flush(void) { uintptr_t p=physical(current); __asm__ volatile("mov %0,%%cr3" :: "r"(p):"memory"); }
 static uint64_t *walk(page_directory_t *root, uintptr_t va, int create, int user) {
     uint64_t *t=root->entries;
@@ -33,10 +33,10 @@ page_directory_t *vmm_create_address_space(void) {
     if (!p) return NULL;
     page_directory_t *root=(void *)table(p);
     kmemset(root,0,PAGE);
-    root->entries[511]=boot_page_directory.entries[511];
+    for (unsigned i=256;i<512;i++) root->entries[i]=boot_page_directory.entries[i];
     return root;
 }
-void vmm_sync_kernel_mappings(page_directory_t *pd) { if(pd) pd->entries[511]=boot_page_directory.entries[511]; }
+void vmm_sync_kernel_mappings(page_directory_t *pd) { if(pd) for(unsigned i=256;i<512;i++) pd->entries[i]=boot_page_directory.entries[i]; }
 void vmm_switch_address_space(page_directory_t *pd) { if(pd) { current=pd; flush(); } }
 int vmm_map_page(uintptr_t va, uintptr_t pa, uint32_t flags) {
     if ((va|pa)&(PAGE-1)) return -1;
@@ -48,7 +48,7 @@ int vmm_map_page(uintptr_t va, uintptr_t pa, uint32_t flags) {
     __asm__ volatile("invlpg (%0)" :: "r"(va):"memory");
     return 0;
 }
-uint32_t vmm_translate(uintptr_t va) {
+uintptr_t vmm_translate(uintptr_t va) {
     uint64_t *t=current->entries;
     for(int shift=39;shift>=12;shift-=9) {
         uint64_t e=t[(va>>shift)&511];

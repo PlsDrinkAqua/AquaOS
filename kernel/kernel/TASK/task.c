@@ -455,7 +455,7 @@ static int task_prepare_user_stack(task_t *task, const char *path,
     }
     for (uintptr_t stack_page = USER_STACK_TOP - USER_STACK_BYTES;
          stack_page < USER_STACK_TOP; stack_page += PAGE_SIZE) {
-        uint32_t stack_phys = pmm_alloc_frame();
+        uintptr_t stack_phys = pmm_alloc_frame();
         if (!stack_phys) return -1;
         if (vmm_map_page(stack_page, stack_phys, VMM_PRESENT | VMM_RW | VMM_USER) < 0) {
             pmm_free_frame(stack_phys);

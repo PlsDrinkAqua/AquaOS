@@ -24,7 +24,7 @@ void vmm_sync_kernel_mappings(page_directory_t *pd);
 
 int vmm_map_page(uintptr_t vaddr, uintptr_t paddr, uint32_t flags);
 
-uint32_t vmm_translate(uintptr_t vaddr);
+uintptr_t vmm_translate(uintptr_t vaddr);
 
 /* Check that every page in a userspace range is present and accessible. */
 bool vmm_user_range_valid(const void *ptr, size_t size, bool writable);

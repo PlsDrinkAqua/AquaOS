@@ -77,7 +77,7 @@ void *sys_sbrk(intptr_t increment) {
         uintptr_t map_end   = ALIGN_UP(new_brk, PAGE_SIZE);
 
         for (uintptr_t va = map_start; va < map_end; va += PAGE_SIZE) {
-            uint32_t phys = pmm_alloc_frame();
+            uintptr_t phys = pmm_alloc_frame();
             if (!phys) {
                 // rollback 已映射的页
                 for (uintptr_t rva = map_start; rva < va; rva += PAGE_SIZE) {

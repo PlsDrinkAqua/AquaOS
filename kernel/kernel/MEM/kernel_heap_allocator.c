@@ -35,7 +35,7 @@ void *vmm_alloc_pages(size_t npages, uint32_t flags) {
 
     for (size_t i = 0; i < npages; i++) {
         // 分配物理页
-        uint32_t phys = pmm_alloc_frame();
+        uintptr_t phys = pmm_alloc_frame();
         if (!phys) {
             // 失败：回退已经映射的页
             for (size_t j = 0; j < i; j++) {
@@ -101,7 +101,7 @@ void vmm_heap_test(void) {
 
     // Verify unmapped: translation should return 0
     uintptr_t va = (uintptr_t)base;
-    uint32_t trans = vmm_translate(va);
+    uintptr_t trans = vmm_translate(va);
     if (trans != 0) {
         kprintf("[heap_test] vmm_free_pages failed: translation still returns 0x%x\n", trans);
     } else {

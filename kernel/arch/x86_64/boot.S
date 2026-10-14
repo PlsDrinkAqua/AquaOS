@@ -43,6 +43,31 @@ _start:
     inc %ecx
     cmp $512, %ecx
     jne 1b
+    /* Separate 64-GiB physical window at ffff800000000000 (PML4 256).
+     * Kernel code retains its original linked alias in PML4 511. */
+    mov $boot_direct_pdpt, %eax
+    or $3, %eax
+    mov %eax, boot_pml4 + 256*8
+    xor %ecx, %ecx
+4:  mov %ecx, %eax
+    shl $12, %eax
+    add $boot_direct_pds, %eax
+    or $3, %eax
+    mov %eax, boot_direct_pdpt(,%ecx,8)
+    inc %ecx
+    cmp $64, %ecx
+    jne 4b
+    xor %ecx, %ecx
+5:  mov %ecx, %eax
+    shl $21, %eax
+    or $0x83, %eax
+    mov %eax, boot_direct_pds(,%ecx,8)
+    mov %ecx, %edx
+    shr $11, %edx
+    mov %edx, boot_direct_pds+4(,%ecx,8)
+    inc %ecx
+    cmp $(64*512), %ecx
+    jne 5b
     mov %cr4, %eax
     or $((1<<5) | (1<<9) | (1<<10)), %eax
     mov %eax, %cr4
@@ -86,6 +111,8 @@ boot_pml4: .skip 4096
 boot_pdpt_low: .skip 4096
 boot_pdpt_high: .skip 4096
 boot_pd: .skip 4096
+boot_direct_pdpt: .skip 4096
+boot_direct_pds: .skip 64*4096
 .align 16
 boot_stack: .skip 16384
 boot_stack_top:

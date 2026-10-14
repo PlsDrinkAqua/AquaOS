@@ -2,11 +2,12 @@
 #include <kernel/layout.h>
 #include <libk/string.h>
 #include <libk/stdio.h>
-/* First implementation manages the 1 GiB bootstrap direct-map window. */
-#define LIMIT (1024UL*1024*1024)
+/* Manage usable firmware RAM within the dedicated physical window. */
+#define LIMIT KERNEL_DIRECT_SIZE
 #define FRAMES (LIMIT/4096)
 static uint8_t bitmap[FRAMES/8];
 static unsigned hint;
+static unsigned managed_frames;
 static void reserve(unsigned n) { bitmap[n/8]|=1U<<(n%8); }
 void pmm_init(multiboot_info_t *physical_info,uint32_t magic) {
     multiboot_info_t *info=(void *)(KERNEL_DIRECT_BASE+(uintptr_t)physical_info);
@@ -15,6 +16,7 @@ void pmm_init(multiboot_info_t *physical_info,uint32_t magic) {
         for(;;) __asm__ volatile("cli; hlt");
     }
     kmemset(bitmap,255,sizeof(bitmap));
+    managed_frames = 0;
     uintptr_t cursor=KERNEL_DIRECT_BASE+info->mmap_addr;
     uintptr_t end=cursor+info->mmap_length;
     while(cursor<end) {
@@ -24,24 +26,32 @@ void pmm_init(multiboot_info_t *physical_info,uint32_t magic) {
         uint64_t len=((uint64_t)m->len_high<<32)|m->len_low;
         if(m->type==1 && base<LIMIT) {
             uint64_t top=len>LIMIT-base?LIMIT:base+len;
+            if (top / 4096 > managed_frames) managed_frames = top / 4096;
             for(uint64_t p=(base+4095)/4096;p<top/4096;p++) bitmap[p/8]&=~(1U<<(p%8));
         }
         cursor+=m->size+4;
     }
     extern char _kernel_end;
-    uintptr_t kernel_end=(uintptr_t)&_kernel_end-KERNEL_DIRECT_BASE;
+    uintptr_t kernel_end=(uintptr_t)&_kernel_end-KERNEL_LINK_BASE;
     /* Keep low firmware memory and all boot/kernel storage reserved. */
     for(unsigned i=0;i<(kernel_end+4095)/4096;i++) reserve(i);
     hint=(kernel_end+4095)/4096;
+    kprintf("PMM: usable map ceiling=%lu MiB, physical addresses=64-bit\n",
+            (unsigned long)managed_frames / 256);
+#ifdef PMM_HIGH_TEST
+    /* Force subsequent page tables, tasks and DMA allocations into high RAM. */
+    hint = (unsigned)(UINT64_C(0x100000000) / 4096);
+#endif
 }
-uint32_t pmm_alloc_frame(void) {
-    for(unsigned j=0;j<FRAMES;j++) {
-        unsigned i=(hint+j)%FRAMES;
-        if(!(bitmap[i/8]&(1U<<(i%8)))) { reserve(i); hint=(i+1)%FRAMES; return i*4096; }
+uintptr_t pmm_alloc_frame(void) {
+    for(unsigned j=0;j<managed_frames;j++) {
+        unsigned i=(hint+j)%managed_frames;
+        if(!(bitmap[i/8]&(1U<<(i%8)))) { reserve(i); hint=(i+1)%managed_frames; return (uintptr_t)i*4096; }
     }
     return 0;
 }
-void pmm_free_frame(uint32_t p) {
+void pmm_free_frame(uintptr_t p) {
+    if (p >= LIMIT) return;
     unsigned i=p/4096;
     if(p && !(p&4095) && i<FRAMES) { bitmap[i/8]&=~(1U<<(i%8)); if(i<hint) hint=i; }
 }

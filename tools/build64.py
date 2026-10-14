@@ -17,7 +17,7 @@ KFLAGS = ['-D__is_libk', '-D__is_kernel', '-mcmodel=kernel', '-mgeneral-regs-onl
           '-I'+str(ROOT/'libk/include'), '-I'+str(ROOT/'userlibc/include')]
 UFLAGS = ['-I'+str(ROOT/'userlibc/include')]
 PROGRAMS = ['shell', 'hello', 'cat', 'cp', 'mv', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo', 'ping']
-TESTS = {'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
+TESTS = {'highmemcheck': 'high_memory', 'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
          'stdiocheck': 'stdio_core', 'intcheck': 'interrupt', 'abi64check': 'abi64'}
 
 def run(args):

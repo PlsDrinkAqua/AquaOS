@@ -57,7 +57,7 @@ typedef struct {
 _Static_assert(sizeof(rx_descriptor_t) == 16, "E1000 RX descriptor size");
 
 static volatile rx_descriptor_t *rx_ring;
-static uint32_t rx_buffers[RX_COUNT];
+static uintptr_t rx_buffers[RX_COUNT];
 static unsigned rx_next;
 static unsigned rx_packets;
 static int rx_ready, rx_fragment;
@@ -86,7 +86,7 @@ typedef struct {
 } tx_descriptor_t;
 _Static_assert(sizeof(tx_descriptor_t) == 16, "E1000 TX descriptor size");
 static volatile tx_descriptor_t *tx_ring;
-static uint32_t tx_buffers[TX_COUNT];
+static uintptr_t tx_buffers[TX_COUNT];
 static unsigned tx_next, tx_clean, tx_pending;
 static int tx_ready;
 
@@ -136,7 +136,7 @@ out:
 static void transmit_init(void) {
     registers[E1000_TCTL / 4] = 0;
     (void)read_register(E1000_STATUS);
-    uint32_t physical = pmm_alloc_frame();
+    uintptr_t physical = pmm_alloc_frame();
     if (!physical) goto failed;
     tx_ring = (volatile tx_descriptor_t *)(KERNEL_DIRECT_BASE + physical);
     kmemset((void *)tx_ring, 0, PAGE_SIZE);
@@ -153,7 +153,7 @@ static void transmit_init(void) {
         tx_ring[allocated].status = TX_DONE;
     }
     registers[E1000_TDBAL / 4] = physical;
-    registers[E1000_TDBAH / 4] = 0;
+    registers[E1000_TDBAH / 4] = physical >> 32;
     registers[E1000_TDLEN / 4] = TX_COUNT * sizeof(tx_descriptor_t);
     registers[E1000_TDH / 4] = 0;
     registers[E1000_TDT / 4] = 0;
@@ -192,7 +192,7 @@ failed:
 static void receive_init(void) {
     registers[E1000_RCTL / 4] = 0;
     (void)read_register(E1000_STATUS);
-    uint32_t ring_phys = pmm_alloc_frame();
+    uintptr_t ring_phys = pmm_alloc_frame();
     if (!ring_phys) goto failed;
     rx_ring = (volatile rx_descriptor_t *)(KERNEL_DIRECT_BASE + ring_phys);
     kmemset((void *)rx_ring, 0, PAGE_SIZE);
@@ -214,7 +214,7 @@ static void receive_init(void) {
         registers[(E1000_RAH0 + i * 8) / 4] = 0;
     for (unsigned i = 0; i < 128; ++i) registers[E1000_MTA / 4 + i] = 0;
     registers[E1000_RDBAL / 4] = ring_phys;
-    registers[E1000_RDBAH / 4] = 0;
+    registers[E1000_RDBAH / 4] = ring_phys >> 32;
     registers[E1000_RDLEN / 4] = RX_COUNT * sizeof(rx_descriptor_t);
     registers[E1000_RDH / 4] = 0;
     /* Publish descriptor contents before handing ownership to DMA. */
