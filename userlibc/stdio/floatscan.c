@@ -510,7 +510,7 @@ static long double floatscan(string_scan *f, int prec, int pok)
 
 /* Materialize the destination type: x87 otherwise retains extra exponent range.
  * This also reports hexadecimal overflow/underflow at the target precision. */
-long double __zenos_floatscan(string_scan *input, int precision, int partial_ok)
+long double __aquaos_floatscan(string_scan *input, int precision, int partial_ok)
 {
     long double value = floatscan(input, precision, partial_ok);
     long double rounded;

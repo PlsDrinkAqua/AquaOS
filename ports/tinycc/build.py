@@ -42,7 +42,7 @@ def replace(file, old, new):
 
 replace('tcc.h', '#include <time.h>', '')
 replace('tcc.h', '# include <sys/time.h>', '')
-replace('tcc.h', '#if defined _WIN32 == defined TCC_TARGET_PE', '#if !defined(__zenos__) && (defined _WIN32 == defined TCC_TARGET_PE)')
+replace('tcc.h', '#if defined _WIN32 == defined TCC_TARGET_PE', '#if !defined(__aquaos__) && (defined _WIN32 == defined TCC_TARGET_PE)')
 replace('tcc.c', '    struct timeval tv;\n    gettimeofday(&tv, NULL);\n    return tv.tv_sec*1000 + (tv.tv_usec+500)/1000;', '    return 0; /* No compiler timing until AquaOS has a clock API. */')
 p = source / 'tccpp.c'; s = p.read_text(); a = s.index('        time_t ti;'); b = s.index('        cstrval = buf;', a)
 s = s[:a] + '        strcpy(buf, tok == TOK___DATE__ ? "Jan  1 1970" : "00:00:00");\n' + s[b:]; p.write_text(s)
@@ -51,7 +51,7 @@ s = s[:a] + '    (void)s; (void)argv; (void)target;\n    tcc_error("AquaOS compi
 replace('libtcc.c', '            s->do_bench = 1;', '            tcc_error("compiler timing is not available on AquaOS");')
 replace('libtcc.c', '    s->output_type = output_type;', '    if (output_type == TCC_OUTPUT_DLL || output_type == TCC_OUTPUT_MEMORY)\n        tcc_error("AquaOS supports compile-to-file only");\n    s->output_type = output_type;')
 replace('libtcc.c', '    s->alacarte_link = 1;', '    s->static_link = 1;\n    s->alacarte_link = 1;')
-replace('libtcc.c', '    tcc_define_symbol(s, "__STDC__", NULL);', '    tcc_define_symbol(s, "__zenos__", "1");\n    tcc_define_symbol(s, "__STDC__", NULL);')
+replace('libtcc.c', '    tcc_define_symbol(s, "__STDC__", NULL);', '    tcc_define_symbol(s, "__aquaos__", "1");\n    tcc_define_symbol(s, "__STDC__", NULL);')
 replace('libtcc.c', '            tcc_add_crt(s, "crt1.o");\n        tcc_add_crt(s, "crti.o");', '            tcc_add_crt(s, "crt0.o");')
 replace('tccelf.c', '        if (s1->output_type != TCC_OUTPUT_MEMORY)\n            tcc_add_crt(s1, "crtn.o");', '        tcc_add_library_err(s1, "gcc"); /* GCC-built AquaOS libc helpers. */')
 # Modern GCC emits PLT32 for external calls, including static objects.
@@ -77,11 +77,11 @@ replace('tccelf.c', '    fclose(f);\n\n    return 0;', '    {\n        int faile
 #define CONFIG_TCC_LIBPATHS "/usr/lib"
 #define CONFIG_TCC_CRTPREFIX "/usr/lib"
 ''')
-cc = os.environ.get('ZENOS64_CC', 'gcc')
-ar = os.environ.get('ZENOS64_AR', 'ar')
+cc = os.environ.get('AQUAOS64_CC', 'gcc')
+ar = os.environ.get('AQUAOS64_AR', 'ar')
 def run(args): subprocess.run(list(map(str, args)), check=True, cwd=ROOT)
 if not LIBC.is_file() or not CRT.is_file(): raise SystemExit('Run python3 tools/build64.py first')
-flags = ['-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-D__zenos__=1', '-I'+str(ROOT/'userlibc/include')]
+flags = ['-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-D__aquaos__=1', '-I'+str(ROOT/'userlibc/include')]
 compiler_headers = subprocess.check_output([cc, '-print-file-name=include'], text=True).strip()
 flags += ['-m64', '-fno-pie', '-mno-red-zone', '-nostdinc', '-isystem', compiler_headers]
 run([cc, *flags, '-c', source/'tcc.c', '-o', BUILD/'tcc.o'])

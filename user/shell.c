@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <zenos/readline.h>
-#include <zenos/task.h>
-#include <zenos/terminal.h>
+#include <aquaos/readline.h>
+#include <aquaos/task.h>
+#include <aquaos/terminal.h>
 
 #define LINE_MAX 128
 #define PIPELINE_MAX 4
@@ -99,12 +99,12 @@ static int run_pipeline(const char *line) {
         puts("shell: invalid pipeline or redirection");
         return 1;
     }
-    if (zenos_terminal_begin_job() < 0) { puts("shell: terminal busy"); return 1; }
+    if (aquaos_terminal_begin_job() < 0) { puts("shell: terminal busy"); return 1; }
     for (int i = 0; i + 1 < count; i++) {
         if (pipe(pipes[i]) < 0) {
             puts("shell: pipe failed");
             for (int j = 0; j < i; j++) { close(pipes[j][0]); close(pipes[j][1]); }
-            zenos_terminal_end_job();
+            aquaos_terminal_end_job();
             return 1;
         }
     }
@@ -138,7 +138,7 @@ static int run_pipeline(const char *line) {
         if (result < 0) launch_failed = 1;
         if (i == count - 1) status = result < 0 ? 1 : result;
     }
-    zenos_terminal_end_job();
+    aquaos_terminal_end_job();
     return launch_failed ? 1 : status;
 }
 
@@ -210,7 +210,7 @@ static int run_command(const char *line) {
     }
 
     if (stage->argc == 1 && strcmp(name, "clear") == 0) {
-        zenos_terminal_clear();
+        aquaos_terminal_clear();
         return 0;
     }
 
@@ -220,7 +220,7 @@ static int run_command(const char *line) {
     }
 
     if (stage->argc == 1 && strcmp(name, "taskinfo") == 0) {
-        zenos_taskinfo();
+        aquaos_taskinfo();
         return 0;
     }
 
@@ -321,7 +321,7 @@ int main(int argc, char **argv) {
     }
     char line[LINE_MAX];
 
-    if (zenos_terminal_claim() < 0) { puts("shell: terminal busy"); return 1; }
+    if (aquaos_terminal_claim() < 0) { puts("shell: terminal busy"); return 1; }
 
     if (argc > 2) { puts("usage: shell [script]"); return 2; }
     if (argc == 2) return run_script(argv[1]);
@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
 
     for (;;) {
         write_str("\033[0;92mAquaOS\033[96m>\033[0m ");
-        if (!zenos_readline_highlight(line, sizeof(line), complete_filename, highlight_line)) {
+        if (!aquaos_readline_highlight(line, sizeof(line), complete_filename, highlight_line)) {
             putchar('\n');
             return 0;
         }

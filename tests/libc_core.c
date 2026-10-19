@@ -19,16 +19,16 @@ static int compare(const void *a, const void *b) {
 static int values[1024];
 int main(void) {
 #ifndef HOST_TEST
-    if (getenv("ZENOS_ENV_CHILD")) {
-        CHECK(getenv("ZENOS_ENV_VALUE") && !strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
-        CHECK(setenv("ZENOS_ENV_VALUE", "child value", 1) == 0);
-        CHECK(unsetenv("ZENOS_ENV_CHILD") == 0);
+    if (getenv("AQUAOS_ENV_CHILD")) {
+        CHECK(getenv("AQUAOS_ENV_VALUE") && !strcmp(getenv("AQUAOS_ENV_VALUE"), "inherited value"));
+        CHECK(setenv("AQUAOS_ENV_VALUE", "child value", 1) == 0);
+        CHECK(unsetenv("AQUAOS_ENV_CHILD") == 0);
         return 0;
     }
-    CHECK(setenv("ZENOS_ENV_VALUE", "inherited value", 1) == 0);
-    CHECK(setenv("ZENOS_ENV_VALUE", "ignored", 0) == 0);
-    CHECK(!strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
-    CHECK(setenv("ZENOS_ENV_CHILD", "1", 1) == 0);
+    CHECK(setenv("AQUAOS_ENV_VALUE", "inherited value", 1) == 0);
+    CHECK(setenv("AQUAOS_ENV_VALUE", "ignored", 0) == 0);
+    CHECK(!strcmp(getenv("AQUAOS_ENV_VALUE"), "inherited value"));
+    CHECK(setenv("AQUAOS_ENV_CHILD", "1", 1) == 0);
     int child = fork(); CHECK(child >= 0);
     if (!child) {
         const char *args[] = {"/bin/libccheck", NULL};
@@ -36,16 +36,16 @@ int main(void) {
         exit(99);
     }
     CHECK(wait(child) == 0);
-    CHECK(!strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
+    CHECK(!strcmp(getenv("AQUAOS_ENV_VALUE"), "inherited value"));
     child = spawn("/bin/libccheck"); CHECK(child > 0);
     CHECK(wait(child) == 0);
-    CHECK(!strcmp(getenv("ZENOS_ENV_VALUE"), "inherited value"));
-    CHECK(unsetenv("ZENOS_ENV_CHILD") == 0);
-    CHECK(unsetenv("ZENOS_ENV_VALUE") == 0);
-    CHECK(getenv("ZENOS_ENV_VALUE") == NULL);
-    CHECK(setenv("ZENOS_ENV_EMPTY", "", 1) == 0);
-    CHECK(getenv("ZENOS_ENV_EMPTY") && !*getenv("ZENOS_ENV_EMPTY"));
-    CHECK(unsetenv("ZENOS_ENV_EMPTY") == 0);
+    CHECK(!strcmp(getenv("AQUAOS_ENV_VALUE"), "inherited value"));
+    CHECK(unsetenv("AQUAOS_ENV_CHILD") == 0);
+    CHECK(unsetenv("AQUAOS_ENV_VALUE") == 0);
+    CHECK(getenv("AQUAOS_ENV_VALUE") == NULL);
+    CHECK(setenv("AQUAOS_ENV_EMPTY", "", 1) == 0);
+    CHECK(getenv("AQUAOS_ENV_EMPTY") && !*getenv("AQUAOS_ENV_EMPTY"));
+    CHECK(unsetenv("AQUAOS_ENV_EMPTY") == 0);
     const char *exec_args[] = {"/bin/libccheck", NULL};
     errno = 0;
     CHECK(execve("/bin/libccheck", exec_args, (const char *const *)(uintptr_t)-1) == -1 && errno == EFAULT);

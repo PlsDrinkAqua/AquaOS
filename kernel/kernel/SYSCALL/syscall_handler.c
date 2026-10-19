@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <kernel/net.h>
+#include <aquaos/net_abi.h>
 #include <kernel/timer.h>
 #include <libk/stdio.h>
 #include <libk/string.h>
@@ -46,6 +47,10 @@ enum {
     SYS_TERMINAL_CONTROL = 28,
     SYS_PING_START = 29,
     SYS_PING_RESULT = 30,
+    SYS_UDP_SOCKET = 31,
+    SYS_UDP_BIND = 32,
+    SYS_UDP_SEND = 33,
+    SYS_UDP_RECEIVE = 34,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -182,6 +187,50 @@ void syscall_handler(interrupt_frame_t *regs)
         case SYS_TERMINAL_CONTROL:
             regs->eax = (uintptr_t)task_terminal_control(regs->ebx);
             break;
+
+        case SYS_UDP_SOCKET:
+            regs->eax = (uintptr_t)fd_udp_socket();
+            break;
+        case SYS_UDP_BIND:
+            regs->eax = regs->ecx > UINT16_MAX ? (uintptr_t)-K_EINVAL :
+                (uintptr_t)fd_udp_bind((int)regs->ebx, (uint16_t)regs->ecx);
+            break;
+        case SYS_UDP_SEND:
+        case SYS_UDP_RECEIVE: {
+            int receiving = regs->eax == SYS_UDP_RECEIVE;
+            aquaos_udp_request_t request;
+            void *user_request = (void *)regs->ecx;
+            int result = -K_EFAULT;
+            uint8_t payload[NET_UDP_MAX_PAYLOAD];
+            if (copy_from_user(&request, user_request, sizeof(request)) < 0) goto udp_done;
+            if (request.reserved || (!receiving && request.length > NET_UDP_MAX_PAYLOAD)) {
+                result = -K_EINVAL;
+                goto udp_done;
+            }
+            if (receiving && request.length > NET_UDP_MAX_PAYLOAD)
+                request.length = NET_UDP_MAX_PAYLOAD;
+            void *data = (void *)(uintptr_t)request.data;
+            if (!vmm_user_range_valid(data, request.length, receiving)) goto udp_done;
+            if (receiving) {
+                /* Validate all output memory before consuming a datagram. Syscall
+                 * entry keeps IRQs disabled, so mappings cannot change here. */
+                if (!vmm_user_range_valid((void *)regs->edx, sizeof(aquaos_udp_address), true)) goto udp_done;
+                result = fd_udp_receive((int)regs->ebx, payload, request.length,
+                                        &request.ip, &request.port);
+                if (result >= 0) {
+                    aquaos_udp_address source = {request.ip, request.port, 0};
+                    if ((result && copy_to_user(data, payload, result) < 0) ||
+                        copy_to_user((void *)regs->edx, &source, sizeof(source)) < 0)
+                        result = -K_EFAULT;
+                }
+            } else {
+                if (request.length && copy_from_user(payload, data, request.length) < 0) goto udp_done;
+                result = fd_udp_send((int)regs->ebx, request.ip, request.port, payload, request.length);
+            }
+        udp_done:
+            regs->eax = (uintptr_t)result;
+            break;
+        }
 
         case SYS_PING_START:
             regs->eax = regs->ebx > UINT32_MAX ? (uintptr_t)-K_EINVAL :

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot myos.iso against a disposable ext2 disk; requires QEMU and e2fsprogs."""
+"""Boot aquaos.iso against a disposable ext2 disk; requires QEMU and e2fsprogs."""
 import argparse
 import hashlib
 import json
@@ -19,8 +19,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
     if tinycc and block_size != 4096:
         raise ValueError("TinyCC runtime archives require --block-size 4096")
     user_dir = ROOT / "build/x86_64/user"
-    iso = ROOT / "build/x86_64/myos.iso"
-    with tempfile.TemporaryDirectory(prefix="zenos-smoke-") as tmp:
+    iso = ROOT / "build/x86_64/aquaos.iso"
+    with tempfile.TemporaryDirectory(prefix="aquaos-smoke-") as tmp:
         tmp = Path(tmp)
         disk = tmp / "disk.img"
         with disk.open("wb") as f:
@@ -618,8 +618,8 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         finally:
             proc.terminate()
             proc.wait(timeout=5)
-            if os.environ.get("ZENOS_SMOKE_DISK"):
-                shutil.copy2(disk, os.environ["ZENOS_SMOKE_DISK"])
+            if os.environ.get("AQUAOS_SMOKE_DISK"):
+                shutil.copy2(disk, os.environ["AQUAOS_SMOKE_DISK"])
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@
 
 /* Initially unbuffered: all I/O reaches the descriptor before returning.
  * This also avoids duplicating pending output across fork or losing it at exec. */
-struct zenos_file { int used, fd, readable, writable, eof, error, pushed; };
+struct aquaos_file { int used, fd, readable, writable, eof, error, pushed; };
 static FILE files[FOPEN_MAX] = {
     {1, 0, 1, 0, 0, 0, EOF}, {1, 1, 0, 1, 0, 0, EOF}, {1, 2, 0, 1, 0, 0, EOF}
 };

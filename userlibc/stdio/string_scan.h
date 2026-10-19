@@ -1,6 +1,6 @@
 /* Bounded string input for the numeric scanner; EOF never reads past NUL. */
-#ifndef ZENOS_STRING_SCAN_H
-#define ZENOS_STRING_SCAN_H
+#ifndef AQUAOS_STRING_SCAN_H
+#define AQUAOS_STRING_SCAN_H
 #include <stddef.h>
 typedef struct {
     const unsigned char *text;
@@ -19,5 +19,5 @@ static inline void shunget(string_scan *s) {
 static inline void shlim(string_scan *s, size_t unused) {
     (void)unused; s->failed = 1;
 }
-long double __zenos_floatscan(string_scan *s, int precision, int partial_ok);
+long double __aquaos_floatscan(string_scan *s, int precision, int partial_ok);
 #endif

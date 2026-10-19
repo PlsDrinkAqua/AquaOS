@@ -331,8 +331,8 @@ uses 4 KiB ext2 images; the former single-indirect file-size restriction
 no longer applies.
 
 `python3 ports/tinycc/make_disk.py` creates a separate development
-disk at `disk/zenos-dev.img` with `/usr/bin/tcc`, headers, libraries and `/home/user/hello.c`; boot
-it together with `build/x86_64/myos.iso`. It never overwrites an existing disk. See
+disk at `disk/aquaos-dev.img` with `/usr/bin/tcc`, headers, libraries and `/home/user/hello.c`; boot
+it together with `build/x86_64/aquaos.iso`. It never overwrites an existing disk. See
 `ports/tinycc/README.md` for the boot command, implementation details and limits.
 
 Ctrl+C foreground interruption:
@@ -350,7 +350,7 @@ At a shell prompt Ctrl+C discards queued input and the current input line, print
 `^C`, and shows another prompt. Ctrl+D keeps its existing EOF behavior. Nested
 shells claim the terminal and restore their parent's ownership on exit. Terminal
 reads outside the foreground group return EIO. This is a single-terminal AquaOS
-API (`zenos_terminal_claim/begin_job/end_job`), without POSIX signal handlers,
+API (`aquaos_terminal_claim/begin_job/end_job`), without POSIX signal handlers,
 kill, background jobs, or stop/resume support. A command executing kernel code
 must finish that operation before termination can be delivered.
 
@@ -361,7 +361,7 @@ reads, prompt cancellation, nested-shell recovery, and repeated orphan cleanup.
 The remaining memory/filesystem regressions and offline e2fsck checks run afterward.
 Rebuild the kernel ISO and shell before testing; existing development disks need
 the rebuilt `/shell` installed while QEMU is stopped, or use a fresh disk created
-with `python3 ports/tinycc/make_disk.py disk/zenos-ctrlc.img`.
+with `python3 ports/tinycc/make_disk.py disk/aquaos-ctrlc.img`.
 
 Native compiler self-rebuilding:
 
@@ -387,8 +387,8 @@ and run native tests. See [Shell scripts](../docs/SHELL.md).
 Shell quoting/parser host checks (including sanitizer checks):
 
 ```sh
-cc -Wall -Wextra -Werror -fsanitize=address,undefined tests/shell_parser_host.c -o /tmp/zenos-shell-parser
-/tmp/zenos-shell-parser
+cc -Wall -Wextra -Werror -fsanitize=address,undefined tests/shell_parser_host.c -o /tmp/aquaos-shell-parser
+/tmp/aquaos-shell-parser
 ```
 
 The QEMU shell suite also checks quoting, escaped spaces, quoted redirection
@@ -409,3 +409,25 @@ IPv4/ICMP boot ping checks and the host validation command are documented in [ne
 `python3 tests/high_memory.py` validates allocations, page tables, fork and NIC DMA above 4 GiB on a 5 GiB QEMU guest. See [high physical memory validation](../docs/X86_64.md#high-physical-memory-validation).
 
 Large-file host and QEMU tests are documented in [large files](../docs/LARGE_FILES.md).
+
+UDP kernel host checks (wire format, checksums, receive validation and bounded
+port queues) are documented in [networking](../docs/NETWORKING.md#udp-kernel-interface).
+
+Real UDP echo round trips through QEMU user networking:
+
+```sh
+python3 tests/network_smoke.py --udp-echo
+```
+
+This builds a test-only guest, runs a localhost UDP echo service, validates 40
+round trips and their PCAPs for each NIC layout, and restores normal build
+artifacts afterward. See [UDP echo regression](../docs/NETWORKING.md#qemu-udp-echo-regression).
+
+Userspace UDP syscall and descriptor checks, Ctrl+C/exit cleanup, and real
+host echo round trips with PCAP validation:
+
+```sh
+python3 tests/network_smoke.py --udp-user
+```
+
+See [userspace UDP descriptors](../docs/NETWORKING.md#userspace-udp-descriptors).

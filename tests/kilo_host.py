@@ -7,10 +7,10 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-with tempfile.TemporaryDirectory(prefix='zenos-kilo-') as directory:
+with tempfile.TemporaryDirectory(prefix='aquaos-kilo-') as directory:
     work = Path(directory)
-    (work / 'zenos').mkdir()
-    shutil.copy2(ROOT / 'userlibc/include/zenos/keys.h', work / 'zenos/keys.h')
+    (work / 'aquaos').mkdir()
+    shutil.copy2(ROOT / 'userlibc/include/aquaos/keys.h', work / 'aquaos/keys.h')
     harness = work / 'check.c'
     harness.write_text(r'''
 #include <assert.h>

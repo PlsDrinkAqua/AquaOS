@@ -33,7 +33,7 @@ static size_t mock_fwrite(const void *p, size_t s, size_t n, FILE *f) {
 #define puts mock_puts
 #define fputs mock_fputs
 #define fwrite mock_fwrite
-#include "../userlibc/zenos/readline.c"
+#include "../userlibc/aquaos/readline.c"
 #define LINE_MAX 128
 static int completion_separator(char c) {
     return c == ' ' || c == '\t' || c == '|' || c == '<' || c == '>' || c == '&';
@@ -52,14 +52,14 @@ int main(void) {
     terminal_buffer = screen;
     terminal_clear();
     input = "ca\t file | cd && nope # comment\n";
-    assert(zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line) == buf);
+    assert(aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line) == buf);
     assert(!strcmp(buf, "cat file | cd && nope # comment"));
     expect(0, 'c', 13); expect(4, 'f', 7); expect(9, '|', 14);
     expect(11, 'c', 11); expect(14, '&', 14); expect(17, 'n', 12);
     expect(22, '#', 8); assert(terminal_color == 7);
     terminal_clear();
     input = "cat\b\n";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!strcmp(buf, "ca")); expect(0, 'c', 12); expect(2, ' ', 7);
     terminal_clear();
     highlight_line("cat cat > cat && ./app # hi");
@@ -70,46 +70,46 @@ int main(void) {
     memset(long_input, 'x', 100);
     long_input[100] = '\b'; long_input[101] = '\n'; long_input[102] = 0;
     input = long_input;
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(strlen(buf) == 99);
     expect(22 * 80, 'P', 7);
     for (unsigned i = 0; i < 99; i++) expect(22 * 80 + 8 + i, 'x', 12);
     expect(22 * 80 + 107, ' ', 7);
     terminal_clear(); input = "cat\003";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!buf[0] && terminal_color == 7);
     input = "";
-    assert(!zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line));
+    assert(!aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line));
     input = "cat";
-    assert(zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line) == buf);
+    assert(aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line) == buf);
     assert(!strcmp(buf, "cat"));
     terminal_clear(); input = "ct\202a\n";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!strcmp(buf, "cat"));
     terminal_clear(); input = "xcat\204\206\205!\202\b\n";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!strcmp(buf, "ca!"));
     terminal_clear(); input = "ca file\204\203\203\t\n";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!strcmp(buf, "cat file"));
     terminal_clear(); input = "draft\202\200\201!\n";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!strcmp(buf, "draf!t"));
     terminal_clear(); input = "\200\n";
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(!strcmp(buf, "draf!t"));
     char tiny[4];
     terminal_clear(); input = "abcd\204Z\206Z\n";
-    zenos_readline_highlight(tiny, sizeof(tiny), complete, highlight_line);
+    aquaos_readline_highlight(tiny, sizeof(tiny), complete, highlight_line);
     assert(!strcmp(tiny, "Zbc"));
     terminal_clear();
     terminal_writestring("\033[25;1HPROMPT> ");
     memset(long_input, 'x', 100);
-    long_input[100] = ZENOS_KEY_HOME; long_input[101] = ZENOS_KEY_DELETE;
-    long_input[102] = 'Y'; long_input[103] = ZENOS_KEY_END;
+    long_input[100] = AQUAOS_KEY_HOME; long_input[101] = AQUAOS_KEY_DELETE;
+    long_input[102] = 'Y'; long_input[103] = AQUAOS_KEY_END;
     long_input[104] = '\n'; long_input[105] = 0;
     input = long_input;
-    zenos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
+    aquaos_readline_highlight(buf, sizeof(buf), complete, highlight_line);
     assert(strlen(buf) == 100 && buf[0] == 'Y');
     expect(22 * 80, 'P', 7); expect(22 * 80 + 8, 'Y', 12);
     readline_history_count = 0;

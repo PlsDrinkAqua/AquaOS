@@ -10,17 +10,62 @@ import struct
 import subprocess
 import tempfile
 import time
+import threading
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def udp_payloads():
+    lengths = (0, 1, 31, 32, 1471, 1472)
+    return [bytes((case + i) & 255 for i in range(lengths[case % 6]))
+            for case in range(40)]
+
+
+class UdpEcho:
+    """Real host UDP peer; bind before building so no port reservation race."""
+    def __init__(self):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind(('127.0.0.1', 0))
+        self.socket.settimeout(.1)
+        self.port = self.socket.getsockname()[1]
+        self.received = []
+        self.error = None
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self.serve, daemon=True)
+
+    def serve(self):
+        try:
+            while not self.stop.is_set():
+                try:
+                    data, source = self.socket.recvfrom(65535)
+                except socket.timeout:
+                    continue
+                self.received.append(data)
+                self.socket.sendto(data, source)
+        except Exception as error:
+            self.error = error
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *unused):
+        self.stop.set()
+        self.thread.join(timeout=2)
+        self.socket.close()
+        assert not self.thread.is_alive(), 'UDP echo thread did not stop'
+        if self.error:
+            raise RuntimeError('Host UDP echo failed') from self.error
+
+
 def boot(tmp, disk, label, devices, expected):
+    echo_start = len(UDP_ECHO.received) if UDP_ECHO else 0
     monitor = tmp / (label + '.qmp')
     capture = tmp / (label + '.pcap')
     network = ['-netdev', 'user,id=net0,net=6.6.6.0/24,host=6.6.6.6,dhcpstart=6.6.6.15',
                '-object', f'filter-dump,id=capture,netdev=net0,file={capture}'] if devices else ['-nic', 'none']
     command = ['qemu-system-x86_64', '-m', os.environ.get('AQUAOS_TEST_MEMORY', '128M'), '-display', 'none', '-serial', 'none',
-               '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/myos.iso'),
+               '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/aquaos.iso'),
                '-drive', f'file={disk},format=raw,if=ide,snapshot={'off' if os.environ.get('AQUAOS_TEST_LARGE_FILE') else 'on'}',
                '-qmp', f'unix:{monitor},server=on,wait=off', *network, *devices]
     with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
@@ -54,25 +99,32 @@ def boot(tmp, disk, label, devices, expected):
                         dump = tmp / 'vga.bin'
                         qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
                         data = dump.read_bytes()[::2]
-                        screen = '\n'.join(data[i:i+80].decode('ascii', errors='replace') for i in range(0, 2000, 80))
-                        if 'GNU GRUB' in screen:
+                        current_screen = '\n'.join(data[i:i+80].decode('ascii', errors='replace') for i in range(0, 2000, 80))
+                        screen += '\n' + current_screen
+                        if 'GNU GRUB' in current_screen:
                             qmp('human-monitor-command', {'command-line': 'sendkey ret'})
+                        if 'UDP: echo FAIL' in screen:
+                            raise AssertionError(screen)
                         if 'fatal kernel exception' in screen:
                             raise AssertionError(screen)
-                        if ('shell at' in screen and (devices or expected in screen) and
-                            (not devices or 'ICMP: reply from 6.6.6.6 seq=1' in screen)):
+                        if (('shell at' in screen or (devices and UDP_ECHO and not UDP_USER)) and (devices or expected in screen) and
+                            (not devices or (UDP_ECHO and not UDP_USER) or 'ICMP: reply from 6.6.6.6 seq=1' in screen) and
+                            (not devices or not UDP_ECHO or UDP_USER or 'UDP: echo PASS (40 datagrams)' in screen)):
                             break
                         time.sleep(.1)
                     else:
                         raise AssertionError(f'{label}: missing {expected!r}\n{screen}')
                     if devices:
                         # Packet logs can scroll PCI discovery off the live VGA view.
-                        qmp('human-monitor-command', {'command-line': 'sendkey shift-pgup'})
-                        time.sleep(.2)
-                        qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
-                        data = dump.read_bytes()[::2]
-                        screen += '\n' + '\n'.join(data[i:i+80].decode('ascii', errors='replace')
-                                                    for i in range(0, 2000, 80))
+                        scroll_pages = 8 if UDP_ECHO and not UDP_USER else 1
+                        for _ in range(scroll_pages):
+                            qmp('human-monitor-command', {'command-line': 'sendkey shift-pgup'})
+                            time.sleep(.2)
+                            qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                            data = dump.read_bytes()[::2]
+                            screen += '\n' + '\n'.join(data[i:i+80].decode('ascii', errors='replace')
+                                                        for i in range(0, 2000, 80))
+                        assert 'shell at' in screen and 'ICMP: reply from 6.6.6.6 seq=1' in screen, screen
                         assert expected in screen, screen
                         match = re.search(r'E1000 MMIO=0x([0-9a-f]+) IRQ=(\d+) pin=(\d+) command=0x([0-9a-f]+)', screen)
                         assert match, screen
@@ -112,14 +164,24 @@ def boot(tmp, disk, label, devices, expected):
                             data = dump.read_bytes()[::2]
                             output = '\n'.join(data[i:i+80].decode('ascii', errors='replace')
                                                for i in range(0, 2000, 80))
+                            if 'udpecho: check failed' in output or 'UDP user echo FAIL: reply' in output:
+                                raise AssertionError(output)
                             if expected_output in output:
                                 time.sleep(.2)
                                 return output
                             time.sleep(.1)
                         raise AssertionError(output)
                     if devices:
-                        qmp('human-monitor-command', {'command-line': 'sendkey shift-pgdn'})
-                        time.sleep(.2)
+                        for _ in range(scroll_pages):
+                            qmp('human-monitor-command', {'command-line': 'sendkey shift-pgdn'})
+                            time.sleep(.2)
+                        if UDP_USER:
+                            command('udpecho --hold', 'UDP holding port 49152')
+                            qmp('human-monitor-command', {'command-line': 'sendkey ctrl-c'})
+                            time.sleep(.3)
+                            command('udpecho --check', 'UDP descriptor checks passed')
+                            output = command(f'udpecho {UDP_ECHO.port}', 'UDP user echo PASS (40 datagrams)')
+                            assert 'UDP user echo FAIL' not in output, output
                         command('ping -c 2 6.6.6.6', '2 transmitted, 2 received')
                         command('ping -c 1 6.6.6.6', '1 transmitted, 1 received')
                         command('ping 6.6.6.3', 'only gateway 6.6.6.6 is supported')
@@ -138,6 +200,12 @@ def boot(tmp, disk, label, devices, expected):
                             command('memcheck', 'memory reliability checks passed')
                     else:
                         command('ping', 'ping: cannot send')
+                        if UDP_USER:
+                            command('udpecho --hold', 'UDP holding port 49152')
+                            qmp('human-monitor-command', {'command-line': 'sendkey ctrl-c'})
+                            time.sleep(.3)
+                            command('udpecho --check', 'UDP descriptor checks passed')
+                            command(f'udpecho {UDP_ECHO.port}', 'UDP user echo FAIL: send (errno=19)')
                     qmp('quit')
             proc.wait(timeout=5)
             if devices:
@@ -205,6 +273,35 @@ def boot(tmp, disk, label, devices, expected):
                         assert packet[:6] == guest_mac
                     echoes.append(icmp[0])
                 assert echoes == [8, 0] * 8, echoes
+                if UDP_ECHO:
+                    assert UDP_ECHO.error is None, UDP_ECHO.error
+                    assert UDP_ECHO.received[echo_start:] == udp_payloads(), 'Host received wrong UDP data'
+                    transmitted, received = [], []
+                    for packet in packets:
+                        if len(packet) < 42 or packet[12:14] != b'\x08\x00' or packet[23] != 17:
+                            continue
+                        ip = packet[14:]
+                        ihl = (ip[0] & 15) * 4
+                        total = int.from_bytes(ip[2:4], 'big')
+                        assert ip[0] >> 4 == 4 and 20 <= ihl <= total <= len(ip)
+                        assert internet_checksum(ip[:ihl]) == 0
+                        assert int.from_bytes(ip[6:8], 'big') & 0xbfff == 0
+                        udp = ip[ihl:total]
+                        source, destination, length, check = struct.unpack('!HHHH', udp[:8])
+                        assert length == len(udp)
+                        pseudo = ip[12:20] + struct.pack('!BBH', 0, 17, length)
+                        assert not check or internet_checksum(pseudo + udp) == 0
+                        if ip[12:16] == guest_ip:
+                            assert ip[16:20] == gateway_ip and (source, destination) == (49152, UDP_ECHO.port)
+                            assert packet[:6] == reply[22:28] and packet[6:12] == guest_mac
+                            assert check, 'Guest omitted UDP checksum'
+                            transmitted.append(udp[8:])
+                        else:
+                            assert ip[12:16] == gateway_ip and ip[16:20] == guest_ip
+                            assert (source, destination) == (UDP_ECHO.port, 49152)
+                            assert packet[:6] == guest_mac
+                            received.append(udp[8:])
+                    assert transmitted == received == udp_payloads(), 'UDP PCAP round trip mismatch'
                 prefix = bytes.fromhex('ffffffffffff06070607060788b5') + b'AquaOS TX test'
                 probes = [packet for packet in packets if packet.startswith(prefix)]
                 assert len(probes) == (70 if TX_STRESS else 1), probes
@@ -215,7 +312,8 @@ def boot(tmp, disk, label, devices, expected):
                 subprocess.run(['e2fsck','-fn',str(disk)],check=True,capture_output=True)
                 contents = subprocess.check_output(['debugfs','-R','stat /large-retained',str(disk)],stderr=subprocess.DEVNULL).decode()
                 assert '5368709121' in contents, contents
-            print(f'PASS: {label}')
+            suffix = ' (UDP echo: 40 datagrams + PCAP)' if UDP_ECHO and devices else ''
+            print(f'PASS: {label}{suffix}', flush=True)
         finally:
             if proc.poll() is None:
                 proc.terminate()
@@ -223,7 +321,7 @@ def boot(tmp, disk, label, devices, expected):
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='zenos-network-') as directory:
+    with tempfile.TemporaryDirectory(prefix='aquaos-network-') as directory:
         tmp = Path(directory)
         disk = tmp / 'disk.img'
         with disk.open('wb') as output:
@@ -231,6 +329,9 @@ def main():
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', os.environ.get('AQUAOS_TEST_BLOCK_SIZE','4096'), '-O', '^large_file' if os.environ.get('AQUAOS_TEST_LARGE_FILE') else 'large_file', str(disk)], check=True)
         batch = tmp / 'install.txt'
         batch.write_text(f'mkdir /bin\nwrite {ROOT / "build/x86_64/user/shell"} /bin/shell\nwrite {ROOT / "build/x86_64/user/ping"} /bin/ping\n')
+        if UDP_USER:
+            with batch.open('a') as install:
+                install.write(f'write {ROOT / "build/x86_64/user/udpecho"} /bin/udpecho\n')
         if os.environ.get('AQUAOS_TEST_LARGE_FILE'):
             with batch.open('a') as install:
                 install.write(f'write {ROOT / "build/x86_64/user/largefilecheck"} /bin/largefilecheck\n')
@@ -253,16 +354,36 @@ def main():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--tx-stress', action='store_true', help='build test-only TX ring wrap traffic')
-    TX_STRESS = parser.parse_args().tx_stress
-    if TX_STRESS:
-        try:
-            environment = dict(os.environ)
-            environment['ZENOS64_CC'] = environment.get('ZENOS64_CC', 'gcc') + ' -DE1000_TX_STRESS'
-            subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=environment, check=True)
-            subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+    parser.add_argument('--udp-echo', action='store_true',
+                        help='build a test-only guest and verify real host UDP echo round trips')
+    parser.add_argument('--udp-user', action='store_true',
+                        help='verify UDP syscalls, fd lifetime and a userspace echo client')
+    args = parser.parse_args()
+    if args.udp_user and args.udp_echo:
+        parser.error('choose either --udp-user or --udp-echo')
+    UDP_USER = args.udp_user
+    TX_STRESS = args.tx_stress
+    UDP_ECHO = None
+
+    def run_tests():
+        if TX_STRESS or UDP_ECHO:
+            try:
+                environment = dict(os.environ)
+                flags = ' -DE1000_TX_STRESS' if TX_STRESS else ''
+                if UDP_ECHO and not UDP_USER:
+                    flags += f' -DAQUAOS_UDP_ECHO_TEST_PORT={UDP_ECHO.port}'
+                environment['AQUAOS64_CC'] = environment.get('AQUAOS64_CC', 'gcc') + flags
+                subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=environment, check=True)
+                subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+                main()
+            finally:
+                subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
+                subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+        else:
             main()
-        finally:
-            subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
-            subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+
+    if args.udp_echo or UDP_USER:
+        with UdpEcho() as UDP_ECHO:
+            run_tests()
     else:
-        main()
+        run_tests()

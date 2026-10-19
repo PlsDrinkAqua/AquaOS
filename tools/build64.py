@@ -7,8 +7,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/x86_64'
-CC = shlex.split(os.environ.get('ZENOS64_CC', 'gcc'))
-AR = shlex.split(os.environ.get('ZENOS64_AR', 'ar'))
+CC = shlex.split(os.environ.get('AQUAOS64_CC', 'gcc'))
+AR = shlex.split(os.environ.get('AQUAOS64_AR', 'ar'))
 COMPILER_HEADERS = subprocess.check_output([*CC, '-print-file-name=include'], text=True).strip()
 FLAGS = ['-nostdinc', '-isystem', COMPILER_HEADERS, '-m64', '-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
          '-fno-pie', '-fcf-protection=none', '-fno-asynchronous-unwind-tables', '-mno-red-zone', '-Wall', '-Wextra',
@@ -16,7 +16,7 @@ FLAGS = ['-nostdinc', '-isystem', COMPILER_HEADERS, '-m64', '-O2', '-g', '-ffree
 KFLAGS = ['-D__is_libk', '-D__is_kernel', '-mcmodel=kernel', '-mgeneral-regs-only', '-I'+str(ROOT/'kernel/include'),
           '-I'+str(ROOT/'libk/include'), '-I'+str(ROOT/'userlibc/include')]
 UFLAGS = ['-I'+str(ROOT/'userlibc/include')]
-PROGRAMS = ['shell', 'hello', 'cat', 'cp', 'mv', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo', 'ping']
+PROGRAMS = ['shell', 'hello', 'cat', 'cp', 'mv', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo', 'ping', 'udpecho']
 TESTS = {'largefilecheck': 'large_file', 'highmemcheck': 'high_memory', 'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
          'stdiocheck': 'stdio_core', 'intcheck': 'interrupt', 'abi64check': 'abi64'}
 
@@ -42,8 +42,8 @@ def build():
     objects += [compile_file(Path('kernel/arch/x86_64')/p, KFLAGS) for p in ['boot.S','interrupts.S']]
     run([*CC, *FLAGS, '-mcmodel=kernel', '-nostdlib', '-no-pie',
          '-Wl,--build-id=none,-z,max-page-size=0x1000', '-T', ROOT/'kernel/arch/x86_64/linker.ld',
-         '-o', OUT/'myos.kernel', *objects, '-lgcc'])
-    run(['grub-file', '--is-x86-multiboot', OUT/'myos.kernel'])
+         '-o', OUT/'aquaos.kernel', *objects, '-lgcc'])
+    run(['grub-file', '--is-x86-multiboot', OUT/'aquaos.kernel'])
     libc = [compile_file(p.relative_to(ROOT), UFLAGS) for p in (ROOT/'userlibc').rglob('*.c')]
     libc.append(compile_file('userlibc/arch/x86_64/setjmp.S', UFLAGS))
     run([*AR, 'rcs', OUT/'libc.a', *libc])

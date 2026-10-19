@@ -1,7 +1,7 @@
 # Terminal colours
 
 Run `sh qemu.sh` to rebuild and boot a fresh x86-64 development disk.
-Previous guest images remain under `disk/zenos64.XXXXXX/`.
+New guest images use `disk/aquaos64.XXXXXX/`; existing images keep their original paths.
 
 Interactive shell input is highlighted as you type: builtins are bright cyan,
 external commands are bright magenta, unknown commands are bright red, operators
@@ -63,8 +63,8 @@ the original bytes. The shell does not interpret backslash escapes in commands.
 Run the terminal regression checks from the repository root:
 
 ```sh
-cc -I kernel/include -idirafter libk/include tests/tty_scrollback.c -o /tmp/zenos-tty-scrollback
-/tmp/zenos-tty-scrollback
-cc -Wall -Wextra -Werror -I kernel/include -idirafter libk/include -idirafter userlibc/include tests/shell_highlight.c -o /tmp/zenos-shell-highlight
-/tmp/zenos-shell-highlight
+cc -I kernel/include -idirafter libk/include tests/tty_scrollback.c -o /tmp/aquaos-tty-scrollback
+/tmp/aquaos-tty-scrollback
+cc -Wall -Wextra -Werror -I kernel/include -idirafter libk/include -idirafter userlibc/include tests/shell_highlight.c -o /tmp/aquaos-shell-highlight
+/tmp/aquaos-shell-highlight
 ```

@@ -44,7 +44,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <fcntl.h>
-#include <zenos/keys.h>
+#include <aquaos/keys.h>
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 
@@ -235,13 +235,13 @@ int editorReadKey(int fd) {
     int n = read(fd, &c, 1);
     if (n <= 0) { fprintf(stderr, "kilo: terminal input ended\n"); exit(1); }
     switch (c) {
-    case ZENOS_KEY_UP: return ARROW_UP;
-    case ZENOS_KEY_DOWN: return ARROW_DOWN;
-    case ZENOS_KEY_LEFT: return ARROW_LEFT;
-    case ZENOS_KEY_RIGHT: return ARROW_RIGHT;
-    case ZENOS_KEY_HOME: return HOME_KEY;
-    case ZENOS_KEY_END: return END_KEY;
-    case ZENOS_KEY_DELETE: return DEL_KEY;
+    case AQUAOS_KEY_UP: return ARROW_UP;
+    case AQUAOS_KEY_DOWN: return ARROW_DOWN;
+    case AQUAOS_KEY_LEFT: return ARROW_LEFT;
+    case AQUAOS_KEY_RIGHT: return ARROW_RIGHT;
+    case AQUAOS_KEY_HOME: return HOME_KEY;
+    case AQUAOS_KEY_END: return END_KEY;
+    case AQUAOS_KEY_DELETE: return DEL_KEY;
     case '\n': return ENTER;
     case '\b': return BACKSPACE;
     default: return c;

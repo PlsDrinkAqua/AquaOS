@@ -66,16 +66,134 @@ static int send_ping(void) {
     return e1000_transmit(frame, sizeof(frame));
 }
 
+/* Fixed storage keeps receive processing allocation-free in timer context. */
+#define UDP_PORTS 8
+#define UDP_DEPTH 4
+struct udp_packet {
+    uint32_t ip;
+    uint16_t port, length;
+    uint8_t data[NET_UDP_MAX_PAYLOAD];
+};
+static struct {
+    uint16_t port;
+    unsigned head, count;
+    struct udp_packet packets[UDP_DEPTH];
+} udp_ports[UDP_PORTS];
+
+static uint16_t udp_checksum(const uint8_t *ip, const uint8_t *udp, size_t n) {
+    uint32_t sum = (uint16_t)~checksum(ip + 12, 8);
+    sum += 17 + n;
+    sum += (uint16_t)~checksum(udp, n);
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+int net_udp_bind(uint16_t port) {
+    if (!port) return -K_EINVAL;
+    int free_slot = -1;
+    for (unsigned i = 0; i < UDP_PORTS; ++i) {
+        if (udp_ports[i].port == port) return -K_EBUSY;
+        if (!udp_ports[i].port) free_slot = (int)i;
+    }
+    if (free_slot < 0) return -K_ENOSPC;
+    udp_ports[free_slot].head = udp_ports[free_slot].count = 0;
+    udp_ports[free_slot].port = port;
+    return 0;
+}
+
+void net_udp_unbind(uint16_t port) {
+    for (unsigned i = 0; i < UDP_PORTS; ++i)
+        if (udp_ports[i].port == port) {
+            udp_ports[i].port = 0;
+            udp_ports[i].count = 0;
+        }
+}
+
+int net_udp_send(uint32_t destination, uint16_t source_port,
+                 uint16_t destination_port, const void *data, size_t length) {
+    if (!destination_port || length > NET_UDP_MAX_PAYLOAD || (!data && length))
+        return -K_EINVAL;
+    /* Only the gateway is resolved: do not misroute local-subnet peers. */
+    if (!(destination >> 24) || (destination >> 28) >= 14 ||
+        (destination >> 24) == 127 ||
+        ((destination & 0xffffff00U) == 0x06060600U && destination != 0x06060606U))
+        return -K_EINVAL;
+    if (!ready) return -K_ENODEV;
+    if (!resolved) return -K_EAGAIN;
+    uint8_t frame[14 + 20 + 8 + NET_UDP_MAX_PAYLOAD] = {0};
+    kmemcpy(frame, gateway_mac, 6);
+    kmemcpy(frame + 6, local_mac, 6);
+    write_be16(frame + 12, 0x0800);
+    uint8_t *ip = frame + 14, *udp = ip + 20;
+    ip[0] = 0x45;
+    write_be16(ip + 2, 28 + length);
+    write_be16(ip + 6, 0x4000);
+    ip[8] = 64; ip[9] = 17;
+    kmemcpy(ip + 12, local_ip, 4);
+    for (unsigned i = 0; i < 4; ++i) ip[16 + i] = destination >> (24 - 8 * i);
+    write_be16(ip + 10, checksum(ip, 20));
+    write_be16(udp, source_port);
+    write_be16(udp + 2, destination_port);
+    write_be16(udp + 4, 8 + length);
+    if (length) kmemcpy(udp + 8, data, length);
+    uint16_t check = udp_checksum(ip, udp, 8 + length);
+    write_be16(udp + 6, check ? check : 0xffff);
+    return e1000_transmit(frame, 42 + length);
+}
+
+static void receive_udp(const uint8_t *ip, unsigned header, unsigned total) {
+    const uint8_t *udp = ip + header;
+    unsigned bytes = read_be16(udp + 4);
+    if (bytes < 8 || bytes != total - header || bytes - 8 > NET_UDP_MAX_PAYLOAD ||
+        (read_be16(udp + 6) && udp_checksum(ip, udp, bytes))) return;
+    uint16_t port = read_be16(udp + 2);
+    if (!port) return;
+    for (unsigned i = 0; i < UDP_PORTS; ++i) {
+        if (udp_ports[i].port != port) continue;
+        if (udp_ports[i].count == UDP_DEPTH) return; /* Drop newest. */
+        struct udp_packet *p = &udp_ports[i].packets[
+            (udp_ports[i].head + udp_ports[i].count) % UDP_DEPTH];
+        p->ip = ((uint32_t)read_be16(ip + 12) << 16) | read_be16(ip + 14);
+        p->port = read_be16(udp);
+        p->length = bytes - 8;
+        kmemcpy(p->data, udp + 8, p->length);
+        ++udp_ports[i].count;
+        return;
+    }
+}
+
+int net_udp_receive(uint16_t port, void *data, size_t capacity,
+                    uint32_t *source_ip, uint16_t *source_port) {
+    if (!port || (!data && capacity) || !source_ip || !source_port) return -K_EINVAL;
+    for (unsigned i = 0; i < UDP_PORTS; ++i) {
+        if (udp_ports[i].port != port) continue;
+        if (!udp_ports[i].count) return -K_EAGAIN;
+        struct udp_packet *p = &udp_ports[i].packets[udp_ports[i].head];
+        if (capacity < p->length) return -K_ERANGE; /* Keep datagram for retry. */
+        if (p->length) kmemcpy(data, p->data, p->length);
+        *source_ip = p->ip; *source_port = p->port;
+        int length = p->length;
+        udp_ports[i].head = (udp_ports[i].head + 1) % UDP_DEPTH;
+        --udp_ports[i].count;
+        return length;
+    }
+    return -K_ENOENT;
+}
+
 static void receive_ipv4(const uint8_t *frame, size_t length) {
-    if (ping_state != 1 || length < 34 || kmemcmp(frame, local_mac, 6) ||
+    if (!resolved || length < 34 || kmemcmp(frame, local_mac, 6) ||
         kmemcmp(frame + 6, gateway_mac, 6)) return;
     const uint8_t *ip = frame + 14;
     unsigned header = (ip[0] & 15) * 4U;
     if ((ip[0] >> 4) != 4 || header < 20 || header > length - 14) return;
     unsigned total = read_be16(ip + 2);
     if (total < header + 8 || total > length - 14 || checksum(ip, header) ||
-        (read_be16(ip + 6) & 0xbfff) || !ip[8] || ip[9] != 1 ||
-        kmemcmp(ip + 12, gateway_ip, 4) || kmemcmp(ip + 16, local_ip, 4)) return;
+        (read_be16(ip + 6) & 0xbfff) || !ip[8] || kmemcmp(ip + 16, local_ip, 4)) return;
+    if (ip[9] == 17) {
+        receive_udp(ip, header, total);
+        return;
+    }
+    if (ip[9] != 1 || ping_state != 1 || kmemcmp(ip + 12, gateway_ip, 4)) return;
     const uint8_t *icmp = ip + header;
     unsigned bytes = total - header;
     if (bytes != PING_BYTES || checksum(icmp, bytes) || icmp[0] || icmp[1] ||
@@ -109,7 +227,13 @@ static int send_arp(unsigned opcode, const uint8_t destination[6],
 }
 
 void net_init(const uint8_t mac[6], uint32_t now) {
+#ifdef AQUAOS_UDP_ECHO_TEST_PORT
+    net_udp_echo_test_reset();
+#endif
     kmemcpy(local_mac, mac, 6);
+    for (unsigned i = 0; i < UDP_PORTS; ++i) {
+        udp_ports[i].port = 0; udp_ports[i].count = 0;
+    }
     resolved = 0;
     ping_state = 0;
     ping_owner = 0;
@@ -125,6 +249,9 @@ void net_poll(uint32_t now) {
     if (!ready) return;
     if (ping_state == 1) ping_elapsed = (uint32_t)(now - ping_started);
     if (resolved) {
+#ifdef AQUAOS_UDP_ECHO_TEST_PORT
+        if (ping_state == 2) net_udp_echo_test_poll(now);
+#endif
         if (!ping_state) {
             ping_started = now;
             if (!send_ping()) {

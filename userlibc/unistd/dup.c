@@ -1,11 +1,11 @@
 #include <unistd.h>
-#include <zenos/syscall.h>
-#include <zenos/sysret.h>
+#include <aquaos/syscall.h>
+#include <aquaos/sysret.h>
 
 int dup(int oldfd) {
-    return zenos_sysret(zenos_syscall1(SYS_DUP, oldfd));
+    return aquaos_sysret(aquaos_syscall1(SYS_DUP, oldfd));
 }
 
 int dup2(int oldfd, int newfd) {
-    return zenos_sysret(zenos_syscall3(SYS_DUP2, oldfd, newfd, 0));
+    return aquaos_sysret(aquaos_syscall3(SYS_DUP2, oldfd, newfd, 0));
 }

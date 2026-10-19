@@ -7,7 +7,7 @@ It does not use Linux syscalls. The first build downloads the pinned archive;
 subsequent builds use its SHA-256-verified cache.
 
 For normal development, run `sh qemu.sh`. Every launch rebuilds the compiler,
-user programs and kernel ISO, creates a fresh disk under `disk/zenos64.XXXXXX/`,
+user programs and kernel ISO, creates a fresh disk under `disk/aquaos64.XXXXXX/`,
 and boots the new images. Previous disk images remain on disk. Stop the previous QEMU instance before launching again.
 Extra QEMU arguments can be passed through, for example `sh qemu.sh -s -S`.
 
@@ -19,8 +19,8 @@ python3 ports/tinycc/build.py
 sh iso.sh
 python3 tests/shell_smoke.py --block-size 4096 --tinycc
 python3 ports/tinycc/make_disk.py
-qemu-system-x86_64 -m 128M -cdrom build/x86_64/myos.iso \
-    -drive file=disk/zenos-dev.img,format=raw,if=ide
+qemu-system-x86_64 -m 128M -cdrom build/x86_64/aquaos.iso \
+    -drive file=disk/aquaos-dev.img,format=raw,if=ide
 ```
 
 The disk creator needs `mkfs.ext2`, `debugfs`, and `e2fsck`, but no root or loop
@@ -28,8 +28,8 @@ mount. It creates a separate 100 MiB development disk and refuses to overwrite
 an existing path. Supply an alternate output filename as its argument to make
 another disk. Existing disk images are not updated by the build or smoke test.
 The host build needs Python 3.12+ and GCC/binutils; boot/testing
-also needs QEMU and the usual GRUB ISO build dependencies. `ZENOS64_CC` and
-`ZENOS64_AR` can override the cross compiler and archiver commands.
+also needs QEMU and the usual GRUB ISO build dependencies. `AQUAOS64_CC` and
+`AQUAOS64_AR` can override the cross compiler and archiver commands.
 
 Inside AquaOS:
 
@@ -58,7 +58,7 @@ installed at `/usr/lib/tcc/COPYING`; upstream sources retain their own notices.
 
 The compiler links `crt0.o` automatically and defaults to static linking. Its
 support runtime handles compiler-generated operations; libgcc supplies helpers
-used by GCC-built libc. `__zenos__` is predefined, with no Linux target macro.
+used by GCC-built libc. `__aquaos__` is predefined, with no Linux target macro.
 AquaOS libc supplies x86-64 setjmp/longjmp; jumping with zero returns one, and
 callee-saved registers and the caller stack are restored. Ordinary C rules for
 volatile locals and the lifetime of the target stack frame apply. This is not
@@ -124,7 +124,7 @@ tcc tcc.c -o stage2
 ```
 
 The original `/usr/bin/tcc` remains installed. The native commands need no
-extra defines or include paths: `__zenos__` is predefined by tcc, `config.h`
+extra defines or include paths: `__aquaos__` is predefined by tcc, `config.h`
 selects the static x86-64 target, and compiler headers/libraries use their
 installed paths. Each resulting compiler still uses the installed host-built
 libc, crt0 and runtime archives. This milestone does not rebuild those libraries
@@ -149,5 +149,5 @@ byte for byte. Add `--layout-only` for a shorter self-hosting and shell-layout
 check that skips the broader kernel/libc regression suite.
 
 Existing development disks are not refreshed by the build. For a fresh disk
-containing the sources, run `python3 ports/tinycc/make_disk.py disk/zenos-selfhost.img`
+containing the sources, run `python3 ports/tinycc/make_disk.py disk/aquaos-selfhost.img`
 and boot it with the QEMU command printed by that script.

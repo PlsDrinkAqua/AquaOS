@@ -7,10 +7,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void zenos_assert_fail(const char *expression, const char *file, int line)
+void aquaos_assert_fail(const char *expression, const char *file, int line)
     __attribute__((noreturn));
 #ifdef __cplusplus
 }
 #endif
-#define assert(expression) ((expression) ? (void)0 : zenos_assert_fail(#expression, __FILE__, __LINE__))
+#define assert(expression) ((expression) ? (void)0 : aquaos_assert_fail(#expression, __FILE__, __LINE__))
 #endif

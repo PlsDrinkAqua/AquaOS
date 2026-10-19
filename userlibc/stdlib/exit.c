@@ -1,8 +1,8 @@
 #include <stdlib.h>
-#include <zenos/syscall.h>
+#include <aquaos/syscall.h>
 
 void exit(int status) {
-    zenos_syscall1(SYS_EXIT, status);
+    aquaos_syscall1(SYS_EXIT, status);
 
     for (;;) {
     }
@@ -11,7 +11,7 @@ void exit(int status) {
 void abort(void) { exit(134); }
 
 #include <stdio.h>
-void zenos_assert_fail(const char *expression, const char *file, int line) {
+void aquaos_assert_fail(const char *expression, const char *file, int line) {
     fprintf(stderr, "Assertion failed: %s (%s:%d)\n", expression, file, line);
     abort();
 }

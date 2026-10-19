@@ -3,12 +3,14 @@
 #include <kernel/fd.h>
 #include <kernel/task.h>
 #include <kernel/tty.h>
+#include <kernel/net.h>
 
 #define OPEN_FILE_MAX 64
 #define PIPE_MAX 16
 #define PIPE_CAPACITY 512
 #define O_ACCMODE 3
 #define O_WRONLY 1
+#define O_RDWR 2
 #define O_APPEND 0x400
 
 typedef struct pipe_object {
@@ -23,7 +25,7 @@ struct open_file {
     uint16_t refs;
     fd_type_t type;
     int flags;
-    union { ext2_file_t ext2; pipe_object_t *pipe; } object;
+    union { ext2_file_t ext2; pipe_object_t *pipe; uint16_t udp_port; } object;
 };
 
 static open_file_t open_files[OPEN_FILE_MAX];
@@ -78,6 +80,8 @@ static int open_file_put(open_file_t *file) {
             if (!pipe->readers && !pipe->writers) kmemset(pipe, 0, sizeof(*pipe));
         }
     }
+    if (file->type == FD_UDP && file->object.udp_port)
+        net_udp_unbind(file->object.udp_port);
     kmemset(file, 0, sizeof(*file));
     task_preemption_enable();
     return result;
@@ -283,10 +287,63 @@ int fd_fcntl(int fd, int command, int flags) {
     if (!entry) return -K_EBADF;
     int current;
     if (entry->type == FD_EXT2) current = entry->open->flags & (O_ACCMODE | O_APPEND);
+    else if (entry->type == FD_UDP) current = O_RDWR;
     else current = entry->type == FD_STDIN || entry->type == FD_PIPE_READ ? 0 : O_WRONLY;
     if (command == 3) return current;
     if (command != 4 || (flags & ~(O_ACCMODE | O_APPEND))) return -K_EINVAL;
+    if (entry->type == FD_UDP && (flags & O_APPEND)) return -K_EINVAL;
     if (entry->type == FD_EXT2)
         entry->open->flags = (entry->open->flags & ~O_APPEND) | (flags & O_APPEND);
     return 0;
+}
+
+/* UDP open descriptions share their bound port and queue across dup/fork. */
+int fd_udp_socket(void) {
+    task_t *task = task_current();
+    if (!task) return -K_EINVAL;
+    int fd = fd_find_free(task, 0);
+    if (fd < 0) return -K_EMFILE;
+    open_file_t *file = open_file_alloc(FD_UDP);
+    if (!file) return -K_ENFILE;
+    task->fds[fd].type = FD_UDP;
+    task->fds[fd].open = file;
+    return fd;
+}
+
+static open_file_t *udp_file(int fd) {
+    fd_entry_t *entry = fd_get(fd);
+    return entry && entry->type == FD_UDP ? entry->open : NULL;
+}
+
+int fd_udp_bind(int fd, uint16_t port) {
+    open_file_t *file = udp_file(fd);
+    if (!file) return -K_EBADF;
+    if (file->object.udp_port) return -K_EINVAL;
+    int result;
+    if (port) result = net_udp_bind(port);
+    else {
+        /* Port zero requests an ephemeral port. At most eight can be busy. */
+        for (unsigned candidate = 49152; ; ++candidate) {
+            result = net_udp_bind((uint16_t)candidate);
+            if (result != -K_EBUSY) { port = candidate; break; }
+            if (candidate == 65535) return -K_ENOSPC;
+        }
+    }
+    if (!result) file->object.udp_port = port;
+    return result;
+}
+
+int fd_udp_send(int fd, uint32_t ip, uint16_t port, const void *data, size_t length) {
+    open_file_t *file = udp_file(fd);
+    if (!file) return -K_EBADF;
+    if (!file->object.udp_port) return -K_EINVAL;
+    int result = net_udp_send(ip, file->object.udp_port, port, data, length);
+    return result ? result : (int)length;
+}
+
+int fd_udp_receive(int fd, void *data, size_t capacity, uint32_t *ip, uint16_t *port) {
+    open_file_t *file = udp_file(fd);
+    if (!file) return -K_EBADF;
+    if (!file->object.udp_port) return -K_EINVAL;
+    return net_udp_receive(file->object.udp_port, data, capacity, ip, port);
 }

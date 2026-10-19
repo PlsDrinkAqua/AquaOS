@@ -7,14 +7,14 @@
 
 void *kmalloc(size_t);
 void kfree(void *);
-void *zenos_malloc(size_t);
-void *zenos_realloc(void *, size_t);
-void zenos_free(void *);
-void *zenos_calloc(size_t, size_t);
+void *aquaos_malloc(size_t);
+void *aquaos_realloc(void *, size_t);
+void aquaos_free(void *);
+void *aquaos_calloc(size_t, size_t);
 static _Alignas(4096) unsigned char kernel_arena[65536], user_arena[65536];
 static size_t kernel_used, user_used;
 static int lock_depth;
-int zenos_errno;
+int aquaos_errno;
 void task_preemption_disable(void) { lock_depth++; }
 void task_preemption_enable(void) { assert(lock_depth > 0); lock_depth--; }
 void *vmm_alloc_pages(size_t n, uint32_t flags) {
@@ -24,7 +24,7 @@ void *vmm_alloc_pages(size_t n, uint32_t flags) {
     kernel_used += n * 4096;
     return p;
 }
-void *zenos_sbrk(intptr_t n) {
+void *aquaos_sbrk(intptr_t n) {
     if (n < 0 || (uintptr_t)n > sizeof(user_arena) - user_used) return (void *)-1;
     void *p = user_arena + user_used;
     user_used += n;
@@ -62,31 +62,31 @@ static void kernel_checks(void) {
     assert(lock_depth == 0);
 }
 static void user_checks(void) {
-    assert(zenos_malloc(SIZE_MAX) == NULL);
-    assert(zenos_malloc(SIZE_MAX - 7) == NULL);
-    assert(zenos_calloc(SIZE_MAX, 2) == NULL);
+    assert(aquaos_malloc(SIZE_MAX) == NULL);
+    assert(aquaos_malloc(SIZE_MAX - 7) == NULL);
+    assert(aquaos_calloc(SIZE_MAX, 2) == NULL);
     assert(user_used == 0);
-    void *a = zenos_malloc(3000); assert(a); zenos_free(a);
+    void *a = aquaos_malloc(3000); assert(a); aquaos_free(a);
     /* An application may also grow the break: never merge across its data. */
-    unsigned char *gap = zenos_sbrk(4096); memset(gap, 0x5a, 4096);
-    void *b = zenos_malloc(6000); assert(b); zenos_free(b);
-    void *c = zenos_malloc(9000); assert(c); memset(c, 0xa5, 9000);
+    unsigned char *gap = aquaos_sbrk(4096); memset(gap, 0x5a, 4096);
+    void *b = aquaos_malloc(6000); assert(b); aquaos_free(b);
+    void *c = aquaos_malloc(9000); assert(c); memset(c, 0xa5, 9000);
     for (int i = 0; i < 4096; i++) assert(gap[i] == 0x5a);
-    zenos_free(c);
-    unsigned char *p = zenos_malloc(64);
+    aquaos_free(c);
+    unsigned char *p = aquaos_malloc(64);
     assert(p); memset(p, 0x3a, 64);
-    void *guard = zenos_malloc(512); assert(guard);
-    void *failed = zenos_realloc(p, 100000);
+    void *guard = aquaos_malloc(512); assert(guard);
+    void *failed = aquaos_realloc(p, 100000);
     assert(!failed);
     for (int i = 0; i < 64; i++) assert(p[i] == 0x3a);
-    unsigned char *moved = zenos_realloc(p, 2000); assert(moved);
+    unsigned char *moved = aquaos_realloc(p, 2000); assert(moved);
     for (int i = 0; i < 64; i++) assert(moved[i] == 0x3a);
-    assert(zenos_realloc(moved, 8) == moved);
-    assert(zenos_realloc(moved, SIZE_MAX) == NULL && moved[0] == 0x3a);
-    assert(zenos_realloc(moved, 0) == NULL);
-    zenos_free(guard);
-    p = zenos_malloc(64); guard = zenos_malloc(512); assert(p && guard);
-    zenos_free(guard); assert(zenos_realloc(p, 128) == p); zenos_free(p);
+    assert(aquaos_realloc(moved, 8) == moved);
+    assert(aquaos_realloc(moved, SIZE_MAX) == NULL && moved[0] == 0x3a);
+    assert(aquaos_realloc(moved, 0) == NULL);
+    aquaos_free(guard);
+    p = aquaos_malloc(64); guard = aquaos_malloc(512); assert(p && guard);
+    aquaos_free(guard); assert(aquaos_realloc(p, 128) == p); aquaos_free(p);
 }
 int main(int argc, char **argv) {
     (void)argv;

@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-with tempfile.TemporaryDirectory(prefix="zenos-stdio-") as name:
+with tempfile.TemporaryDirectory(prefix="aquaos-stdio-") as name:
     work = Path(name)
     shim = work / "shim.c"
     shim.write_text(r'''

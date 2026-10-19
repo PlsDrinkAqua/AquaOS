@@ -1,7 +1,7 @@
 #include <unistd.h>
-#include <zenos/syscall.h>
-#include <zenos/sysret.h>
+#include <aquaos/syscall.h>
+#include <aquaos/sysret.h>
 
 int open(const char *path, int flags, ...) {
-    return zenos_sysret(zenos_syscall3(SYS_OPEN, (intptr_t)path, flags, 0));
+    return aquaos_sysret(aquaos_syscall3(SYS_OPEN, (intptr_t)path, flags, 0));
 }

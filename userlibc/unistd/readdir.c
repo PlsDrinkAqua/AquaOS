@@ -1,7 +1,7 @@
 #include <unistd.h>
-#include <zenos/syscall.h>
-#include <zenos/sysret.h>
+#include <aquaos/syscall.h>
+#include <aquaos/sysret.h>
 
 int readdir(int fd, char *name, size_t name_size) {
-    return zenos_sysret(zenos_syscall3(SYS_READDIR, fd, (intptr_t)name, (intptr_t)name_size));
+    return aquaos_sysret(aquaos_syscall3(SYS_READDIR, fd, (intptr_t)name, (intptr_t)name_size));
 }

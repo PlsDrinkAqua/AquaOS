@@ -22,7 +22,7 @@ def create(output):
         if '\n' in value or '\r' in value:
             raise ValueError('Newlines in disk installation paths are unsupported')
         return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
-    with tempfile.TemporaryDirectory(prefix='zenos64-', dir=output.parent) as tmp:
+    with tempfile.TemporaryDirectory(prefix='aquaos64-', dir=output.parent) as tmp:
         image = Path(tmp)/'disk.img'
         with image.open('wb') as stream:
             stream.truncate(100 * 1024 * 1024)
@@ -50,5 +50,5 @@ def create(output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('output', nargs='?', type=Path, default=ROOT/'disk/zenos64-dev.img')
+    parser.add_argument('output', nargs='?', type=Path, default=ROOT/'disk/aquaos64-dev.img')
     create(parser.parse_args().output)

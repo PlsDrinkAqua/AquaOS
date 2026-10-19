@@ -269,7 +269,7 @@ EOF, and check `fclose` for failure. Finish the descriptor exercises first.
 ## Source references
 
 - [Public descriptor API](../userlibc/include/unistd.h)
-- [Error translation](../userlibc/include/zenos/sysret.h)
+- [Error translation](../userlibc/include/aquaos/sysret.h)
 - [Existing cat implementation](../user/cat.c), useful after attempting step 2
 - [Existing directory listing](../user/ls.c), useful after attempting step 7
 - [Kernel filesystem implementation](../kernel/kernel/FILESYSTEM/ext2_api.c)

@@ -16,8 +16,8 @@ The guest now uses static IP `6.6.6.15/24` and resolves gateway `6.6.6.6`.
 DNS is not yet used.
 
 Each launch retains `network.pcap` beside `dev.img` under its new
-`disk/zenos64.*` directory and prints both paths. Open the capture in Wireshark
-or inspect it with `tcpdump -nn -r disk/zenos64.XXXXXX/network.pcap`.
+`disk/aquaos64.*` directory and prints both paths. Open the capture in Wireshark
+or inspect it with `tcpdump -nn -r disk/aquaos64.XXXXXX/network.pcap`.
 Expect a 60-byte broadcast with experimental EtherType 0x88b5 and payload
 `AquaOS TX test`, sourced from the programmed station MAC `06:07:06:07:06:07`.
 The user backend requires no TAP device or root privileges. Future guest
@@ -131,8 +131,8 @@ request replies, bounded retries and timer wraparound:
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
   -Ikernel/include -idirafter libk/include \
-  tests/arp_host.c kernel/kernel/NET/net.c -o /tmp/zenos-arp-host
-/tmp/zenos-arp-host
+  tests/arp_host.c kernel/kernel/NET/net.c -o /tmp/aquaos-arp-host
+/tmp/aquaos-arp-host
 ```
 
 ## IPv4/ICMP boot ping
@@ -188,11 +188,145 @@ when all requests receive replies, 1 on send failure or packet loss, and 2 for
 invalid arguments or unsupported destinations. Only `6.6.6.6` is supported;
 there is no DNS lookup or general destination routing yet.
 
-Syscalls 29/30 back `zenos_ping_start()` and `zenos_ping_result()` in
-`<zenos/net.h>`. Start queues one request; result reports EAGAIN while waiting,
+Syscalls 29/30 back `aquaos_ping_start()` and `aquaos_ping_result()` in
+`<aquaos/net.h>`. Start queues one request; result reports EAGAIN while waiting,
 then returns RTT or ETIMEDOUT and consumes the result. The caller sleeps between
 polls. One process owns the active probe; other callers get EBUSY at start and
 EPERM when reading another process's result. Process exit (including Ctrl+C)
 cancels ownership. Wire sequence numbers change between requests to reject
 stale replies. Existing development images need the rebuilt `/bin/ping` copied
 in while QEMU is stopped, or use `sh qemu.sh` for a fresh image.
+
+## UDP kernel interface
+
+IPv4 now dispatches protocol 17 to UDP independently of the ICMP ping state.
+`kernel/include/kernel/net.h` exposes nonblocking `net_udp_bind`,
+`net_udp_unbind`, `net_udp_send` and `net_udp_receive`. These are kernel APIs:
+all callers must disable interrupts, as with the existing network interface.
+IP addresses use `0xAABBCCDD` integers and ports use host-order integers.
+Userspace descriptors are exposed through the AquaOS UDP API below.
+
+The implementation follows [RFC 768](https://www.rfc-editor.org/rfc/rfc768).
+Send generates the IPv4 and UDP pseudo-header checksums, including odd-length
+payloads and the zero-checksum-to-0xffff encoding. Receive validates IPv4 and
+UDP lengths and nonzero UDP checksums; IPv4 UDP packets with checksum zero are
+accepted. IPv4 options and Ethernet padding are handled. Fragmented packets
+are dropped; payloads are limited to 1472 bytes (1500-byte IPv4 MTU).
+
+Eight ports can be bound, each with a four-datagram FIFO holding owned copies
+of payloads and source addresses/ports. Unbound traffic and new arrivals to a
+full queue are silently dropped. A receive returns the payload length, including
+zero for an empty datagram, or `-K_EAGAIN` when empty. A buffer that is too small
+returns `-K_ERANGE` and leaves the datagram queued. Unbinding discards the queue.
+Send returns zero when queued to the NIC, or propagates its error; it does not
+promise delivery. Receive processing performs no memory allocations.
+
+Routing still uses only the resolved gateway MAC. Sends support the gateway
+itself and off-subnet unicast destinations. Other local-subnet destinations,
+loopback, multicast and broadcast are rejected; general ARP/routing, DHCP,
+ICMP errors for closed UDP ports and retransmission remain unimplemented.
+
+Host verification:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include tests/udp_host.c -o /tmp/aquaos-udp-host
+/tmp/aquaos-udp-host
+```
+
+The tests independently verify wire checksums for every payload size from
+0 to 1472 bytes, checksum-zero encoding, receive source metadata, truncated and
+corrupt packets, invalid lengths, IP options, fragments, Ethernet padding,
+queue bounds, port exhaustion, unbinding, small-buffer retries and send errors.
+`python3 tests/network_smoke.py` checks the existing QEMU ARP/ICMP behavior.
+
+### QEMU UDP echo regression
+
+```sh
+python3 tests/network_smoke.py --udp-echo
+```
+
+This mode binds a real host UDP echo service on `127.0.0.1` at an OS-selected
+port, then builds a test-only kernel that sends to that port through QEMU's
+`6.6.6.6` host alias. No TAP, root privileges, Internet access or inbound port
+forwarding is required. The host socket stays bound throughout the run.
+
+After the boot ICMP reply, the guest binds UDP port 49152 and sends 40 datagrams
+one at a time. Payload sizes cycle through 0, 1, 31, 32, 1471 and 1472 bytes,
+with binary contents depending on the packet index. The guest checks each echo's
+source IP, source port, length and every payload byte before proceeding. A send
+error, invalid reply or three-second reply timeout produces `UDP: echo FAIL`;
+success prints `UDP: echo PASS (40 datagrams)` and releases the bound port.
+This exercises descriptor-ring wrap as well as minimum and maximum payloads.
+
+The host checks the exact data received by its real UDP socket. After shutdown,
+the test independently checks both directions in the PCAP: Ethernet/IP addresses,
+ports, IP and UDP lengths, IPv4 header checksums, UDP pseudo-header checksums and
+all payloads in order. Guest UDP checksums must be present; a zero checksum in
+an incoming IPv4 UDP packet is permitted. All three existing PCI layouts run
+these checks; the no-NIC boot still runs its normal regression.
+
+Like `--tx-stress`, this mode rebuilds shared build artifacts and restores the
+normal kernel and ISO in a `finally` block, including after test failure. Run
+with other builds stopped. Disposable guest disks are used throughout. The
+probe is compiled only when `AQUAOS_UDP_ECHO_TEST_PORT` is defined; normal builds
+send no UDP test traffic. `--udp-echo` and `--tx-stress` can be combined.
+
+
+## Userspace UDP descriptors
+
+`<aquaos/net.h>` provides the following AquaOS-specific, nonblocking API:
+
+```c
+int aquaos_udp_socket(void);
+int aquaos_udp_bind(int fd, uint16_t port);
+int aquaos_udp_sendto(int fd, const void *data, size_t length,
+                     uint32_t ip, uint16_t port);
+int aquaos_udp_recvfrom(int fd, void *data, size_t capacity,
+                       aquaos_udp_address *source);
+```
+
+Create a descriptor, bind it, then send or receive. Bind port zero to select
+an available ephemeral port in 49152–65535, or specify a nonzero port. Each
+open UDP description can be bound once. A port already bound elsewhere returns
+`EBUSY`; exhaustion of the eight kernel port queues returns `ENOSPC`.
+IP addresses and ports are numeric host integers: `0x06060606` means `6.6.6.6`.
+The existing gateway-only ARP/routing restrictions still apply.
+
+Socket creation returns a file descriptor; bind returns zero; send and receive
+return payload bytes, including zero for empty datagrams. Errors return -1 and
+set `errno`. Receive returns `EAGAIN` when empty. A buffer too small returns
+`ERANGE` and preserves the datagram. The required source output contains the
+sender's `ip` and `port` (and a reserved field set to zero). Invalid user buffers
+return `EFAULT` before any packet is queued or consumed. Payloads remain limited
+to 1472 bytes; receive capacities may be larger. There is no blocking mode, connect, DNS, or POSIX socket API.
+
+Use ordinary `close`, `dup`, `dup2` and `fork` with these descriptors. Duplicated
+or inherited descriptors share the port and receive FIFO. Descriptors survive
+exec, as other descriptors do in AquaOS. The last close releases the port and
+discards queued packets; normal exit and Ctrl+C use that same cleanup path.
+`lseek` returns `ESPIPE`. Use the UDP calls for datagrams; generic `read`/`write`
+are unsupported. `fcntl(F_GETFL)` reports `O_RDWR`, and append is unsupported.
+Syscalls 31–34 implement create, bind, send and receive; fixed-width requests
+are defined in `<aquaos/net_abi.h>`. Kernel buffers isolate user memory from DMA.
+
+The `udpecho <host-port>` program sends 40 datagrams to the QEMU host alias,
+using the same binary payloads as the kernel echo test. It checks source
+metadata, data integrity, empty packets, maximum-size packets, small-buffer
+retries and invalid-buffer retries. `udpecho --check` exercises descriptor and
+pointer errors, dup/dup2, fork and exec inheritance, exit cleanup, ephemeral
+binding, queue-slot exhaustion/reuse and descriptor exhaustion without a NIC.
+
+```sh
+python3 tests/network_smoke.py --udp-user
+```
+
+This mode builds the ordinary kernel and userspace, starts the host UDP echo
+service, and installs `/bin/udpecho` on a disposable disk. All three NIC layouts
+run the userspace client and validate the host socket data and PCAPs. Each layout
+also interrupts a bound `udpecho --hold` process with Ctrl+C before running the
+descriptor checks, proving that the port is released. The no-NIC layout runs
+the same lifetime checks and verifies send failure with `ENODEV`. The kernel
+boot echo probe is disabled in this mode. `--udp-user` and `--udp-echo` select
+separate clients; either may be combined with `--tx-stress`. Normal build
+artifacts are restored afterward. Stop other builds before running this mode.

@@ -1,6 +1,6 @@
-#include <zenos/syscall.h>
+#include <aquaos/syscall.h>
 
-intptr_t zenos_syscall1(int num, intptr_t arg1) {
+intptr_t aquaos_syscall1(int num, intptr_t arg1) {
     intptr_t ret;
 
     __asm__ volatile (
@@ -13,7 +13,7 @@ intptr_t zenos_syscall1(int num, intptr_t arg1) {
     return ret;
 }
 
-intptr_t zenos_syscall3(int num, intptr_t arg1, intptr_t arg2, intptr_t arg3) {
+intptr_t aquaos_syscall3(int num, intptr_t arg1, intptr_t arg2, intptr_t arg3) {
     intptr_t ret;
 
     __asm__ volatile (

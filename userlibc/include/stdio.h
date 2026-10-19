@@ -8,7 +8,7 @@
 #define SEEK_END 2
 #define FOPEN_MAX 16
 
-typedef struct zenos_file FILE;
+typedef struct aquaos_file FILE;
 #ifdef __cplusplus
 extern "C" {
 #endif

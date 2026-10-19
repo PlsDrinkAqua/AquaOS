@@ -1,5 +1,5 @@
-#ifndef _ZENOS_SYSCALL_H
-#define _ZENOS_SYSCALL_H 1
+#ifndef _AQUAOS_SYSCALL_H
+#define _AQUAOS_SYSCALL_H 1
 #include <stdint.h>
 
 enum {
@@ -34,14 +34,18 @@ enum {
     SYS_TERMINAL_CONTROL = 28,
     SYS_PING_START = 29,
     SYS_PING_RESULT = 30,
+    SYS_UDP_SOCKET = 31,
+    SYS_UDP_BIND = 32,
+    SYS_UDP_SEND = 33,
+    SYS_UDP_RECEIVE = 34,
 };
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-intptr_t zenos_syscall1(int num, intptr_t arg1);
-intptr_t zenos_syscall3(int num, intptr_t arg1, intptr_t arg2, intptr_t arg3);
+intptr_t aquaos_syscall1(int num, intptr_t arg1);
+intptr_t aquaos_syscall3(int num, intptr_t arg1, intptr_t arg2, intptr_t arg3);
 
 #ifdef __cplusplus
 }

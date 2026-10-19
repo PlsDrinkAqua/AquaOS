@@ -7,6 +7,6 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT/'build/x86_64'
 boot = OUT/'isodir/boot'
 (boot/'grub').mkdir(parents=True, exist_ok=True)
-shutil.copy2(OUT/'myos.kernel', boot/'myos.kernel')
-(boot/'grub/grub.cfg').write_text('menuentry "AquaOS x86-64" {\n multiboot /boot/myos.kernel\n}\n')
-subprocess.run(['grub-mkrescue', '-o', str(OUT/'myos.iso'), str(OUT/'isodir')], check=True)
+shutil.copy2(OUT/'aquaos.kernel', boot/'aquaos.kernel')
+(boot/'grub/grub.cfg').write_text('menuentry "AquaOS x86-64" {\n multiboot /boot/aquaos.kernel\n}\n')
+subprocess.run(['grub-mkrescue', '-o', str(OUT/'aquaos.iso'), str(OUT/'isodir')], check=True)

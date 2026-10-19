@@ -14,7 +14,7 @@ SOURCE = bytes.fromhex('020000000001')
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='zenos-rx-') as folder:
+    with tempfile.TemporaryDirectory(prefix='aquaos-rx-') as folder:
         tmp = Path(folder)
         disk = tmp / 'disk.img'
         with disk.open('wb') as stream:
@@ -29,7 +29,7 @@ def main():
         path = tmp / 'qmp'
         proc = subprocess.Popen([
             'qemu-system-x86_64', '-m', '128M', '-display', 'none', '-serial', 'none',
-            '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/myos.iso'),
+            '-no-reboot', '-cdrom', str(ROOT / 'build/x86_64/aquaos.iso'),
             '-drive', f'file={disk},format=raw,if=ide,snapshot=on',
             '-netdev', f'socket,id=n0,fd={guest.fileno()}',
             '-device', 'e1000,netdev=n0,mac=52:54:00:12:34:56',

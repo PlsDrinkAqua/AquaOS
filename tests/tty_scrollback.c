@@ -1,5 +1,5 @@
 /* Run: cc -I kernel/include -idirafter libk/include tests/tty_scrollback.c
- *      -o /tmp/zenos-tty-scrollback && /tmp/zenos-tty-scrollback
+ *      -o /tmp/aquaos-tty-scrollback && /tmp/aquaos-tty-scrollback
  */
 #include <assert.h>
 #include <stdio.h>

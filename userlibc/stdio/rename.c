@@ -1,7 +1,7 @@
 #include <stdio.h>
-#include <zenos/syscall.h>
-#include <zenos/sysret.h>
+#include <aquaos/syscall.h>
+#include <aquaos/sysret.h>
 
 int rename(const char *old_path, const char *new_path) {
-    return zenos_sysret(zenos_syscall3(SYS_RENAME, (intptr_t)old_path, (intptr_t)new_path, 0));
+    return aquaos_sysret(aquaos_syscall3(SYS_RENAME, (intptr_t)old_path, (intptr_t)new_path, 0));
 }

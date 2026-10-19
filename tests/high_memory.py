@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 env = dict(os.environ)
-env['ZENOS64_CC'] = env.get('ZENOS64_CC', 'gcc') + ' -DPMM_HIGH_TEST'
+env['AQUAOS64_CC'] = env.get('AQUAOS64_CC', 'gcc') + ' -DPMM_HIGH_TEST'
 env['AQUAOS_TEST_MEMORY'] = '5G'
 env['AQUAOS_TEST_HIGH_RAM'] = '1'
 try:

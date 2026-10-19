@@ -1,7 +1,7 @@
 #include <unistd.h>
-#include <zenos/syscall.h>
-#include <zenos/sysret.h>
+#include <aquaos/syscall.h>
+#include <aquaos/sysret.h>
 
 int spawn(const char *path) {
-    return zenos_sysret(zenos_syscall3(SYS_SPAWN, (intptr_t)path, (intptr_t)environ, 0));
+    return aquaos_sysret(aquaos_syscall3(SYS_SPAWN, (intptr_t)path, (intptr_t)environ, 0));
 }

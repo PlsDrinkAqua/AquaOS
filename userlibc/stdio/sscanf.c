@@ -139,7 +139,7 @@ int vsscanf(const char *text, const char *format, va_list args) {
         if (floating || number) {
             string_scan input = { p, 0, width, 0, 0 };
             if (floating) {
-                long double value = __zenos_floatscan(&input, length == BIGL ? 2 : length == L ? 1 : 0, 0);
+                long double value = __aquaos_floatscan(&input, length == BIGL ? 2 : length == L ? 1 : 0, 0);
                 if (input.failed) return assigned;
                 if (out) {
                     if (length == BIGL) *(long double *)out = value;

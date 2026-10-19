@@ -2,7 +2,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <zenos/net.h>
+#include <aquaos/net.h>
 
 int main(int argc, char **argv) {
     unsigned count = 4;
@@ -24,14 +24,14 @@ int main(int argc, char **argv) {
     printf("PING %s: %u requests\n", target, count);
     unsigned received = 0;
     for (unsigned sequence = 1; sequence <= count; ++sequence) {
-        if (zenos_ping_start(0x06060606U) < 0) {
+        if (aquaos_ping_start(0x06060606U) < 0) {
             fprintf(stderr, "ping: cannot send (errno=%d)\n", errno);
             return 1;
         }
         int result;
         do {
             sleep(1);
-            result = zenos_ping_result();
+            result = aquaos_ping_result();
         } while (result < 0 && errno == EAGAIN);
         if (result >= 0) {
             ++received;

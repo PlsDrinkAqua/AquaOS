@@ -6,7 +6,7 @@ The installed AquaOS filesystem uses these directories:
 | --- | --- |
 | `/bin` | Shell and core commands: cat, cp, mv, ls, echo, mkdir, rm, rmdir, hello, kilo |
 | `/usr/bin` | Native C compiler, tcc |
-| `/usr/include` | Public C library headers, including sys/ and zenos/ |
+| `/usr/include` | Public C library headers, including sys/ and aquaos/ |
 | `/usr/lib` | libc.a, crt0.o, and libgcc.a |
 | `/usr/lib/tcc` | Compiler support library and license |
 | `/home/user` | Example C sources and space for user projects |

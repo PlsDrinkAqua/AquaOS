@@ -6,7 +6,10 @@
 #include <setjmp.h>
 #include <limits.h>
 #include <float.h>
-#ifndef __zenos__
+#include <unistd.h>
+#include <errno.h>
+#include <aquaos/net.h>
+#ifndef __aquaos__
 #error Missing AquaOS target macro
 #endif
 #define CHECK(x) do { if (!(x)) { printf("FAIL native line %d\n", __LINE__); return 1; } } while (0)
@@ -19,6 +22,13 @@ static int sum(int n, ...) {
 }
 extern int companion(int);
 int main(void) {
+    /* Compile the renamed public header and link OS-specific libc symbols. */
+    int udp = aquaos_udp_socket();
+    CHECK(udp >= 0 && aquaos_udp_bind(udp, 0) == 0);
+    aquaos_udp_address source;
+    char byte;
+    CHECK(aquaos_udp_recvfrom(udp, &byte, 1, &source) == -1 && errno == EAGAIN);
+    CHECK(close(udp) == 0);
     char text[128]; int n; double d;
     CHECK(stdout != NULL && stderr != NULL);
     volatile unsigned long long large = 100000000000ULL, divisor = 7;

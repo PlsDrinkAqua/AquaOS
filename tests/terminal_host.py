@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-with tempfile.TemporaryDirectory(prefix="zenos-terminal-") as directory:
+with tempfile.TemporaryDirectory(prefix="aquaos-terminal-") as directory:
     binary = Path(directory) / "terminal"
     subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                     "-I", str(ROOT / "kernel/include"),

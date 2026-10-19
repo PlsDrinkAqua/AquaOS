@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / 'build/x86_64/vim-probe'
 REV = 'v9.1.0000'
 SHA = '8d2a74e358be9cf260174e15e2e29dba4773f2670718b5bf728db6f54b90e25d'
-CC = os.environ.get('ZENOS64_CC', 'gcc')
+CC = os.environ.get('AQUAOS64_CC', 'gcc')
 BUILD.mkdir(parents=True, exist_ok=True)
 archive = BUILD / 'source.tar.gz'
 if not archive.exists():
@@ -32,7 +32,7 @@ if not libc.exists() or not crt.exists():
 compiler_headers = subprocess.check_output([CC, '-print-file-name=include'], text=True).strip()
 flags = ['-m64', '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
          '-fno-pie', '-mno-red-zone', '-nostdinc', '-isystem', compiler_headers,
-         '-I' + str(ROOT / 'userlibc/include'), '-D__zenos__=1', '-U__linux__', '-U__unix__']
+         '-I' + str(ROOT / 'userlibc/include'), '-D__aquaos__=1', '-U__linux__', '-U__unix__']
 link = ['-no-pie', '-nostdlib', '-T', str(ROOT / 'user/user.ld'), str(crt)]
 wrapper = BUILD / 'cc'
 # Reject explicit host libraries: configure must not discover Linux libraries.
