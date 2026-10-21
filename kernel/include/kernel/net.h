@@ -7,6 +7,10 @@
 void net_init(const uint8_t mac[6], uint32_t now);
 void net_receive(const uint8_t *frame, size_t length);
 void net_poll(uint32_t now);
+/* Resolve a unicast next hop. Local /24 peers use ARP; remote IPs use gateway.
+ * Returns 0 and MAC, EAGAIN while resolving, ETIMEDOUT during failure cooldown,
+ * ENOSPC if all eight peer slots are occupied. Retry send after EAGAIN. */
+int net_resolve(uint32_t destination, uint8_t out[6]);
 /* Copy the resolved gateway MAC; returns 1 if available, otherwise 0. */
 int net_gateway_mac(uint8_t out[6]);
 
@@ -20,7 +24,8 @@ void net_ping_cancel(uint32_t pid);
  * integers (IP 0xAABBCCDD). Eight bound ports, four queued datagrams per port.
  * Send returns 0 when queued. Receive returns bytes, EAGAIN when empty,
  * ERANGE without consuming when capacity is too small. Unbind discards queue.
- * Gateway and off-subnet unicast only; no fragmentation or socket syscalls. */
+ * Local peers and off-subnet unicast; no fragmentation. ARP misses return
+ * EAGAIN without queuing the datagram. */
 #define NET_UDP_MAX_PAYLOAD 1472U
 int net_udp_bind(uint16_t port);
 void net_udp_unbind(uint16_t port);

@@ -21,6 +21,67 @@ static int ping_state; /* 0=unsent, 1=waiting, 2=reply, 3=timeout/send failure. 
 #define ARP_RETRY_TICKS 100U /* Current PIT configuration: 100 Hz. */
 #define ARP_MAX_ATTEMPTS 3U
 
+/* Gateway stays pinned; peer entries have bounded retries and cache lifetime. */
+#define ARP_PEERS 8U
+#define ARP_CACHE_TICKS 6000U
+#define ARP_FAILED_TICKS 300U
+static struct arp_peer {
+    uint32_t ip, changed;
+    uint8_t mac[6];
+    unsigned attempts;
+    int state; /* 0=free, 1=pending, 2=resolved, 3=failed. */
+} peers[ARP_PEERS];
+static uint32_t network_now;
+static int send_arp(unsigned, const uint8_t[6], const uint8_t[6], const uint8_t[4]);
+
+static uint32_t read_ip(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | p[3];
+}
+
+static int valid_destination(uint32_t ip) {
+    return (ip >> 24) && (ip >> 28) < 14 && (ip >> 24) != 127 &&
+        ip != 0x06060600U && ip != 0x060606ffU && ip != 0x0606060fU;
+}
+
+static void peer_request(struct arp_peer *peer) {
+    static const uint8_t unknown[6];
+    uint8_t ip[4];
+    for (unsigned i = 0; i < 4; ++i) ip[i] = peer->ip >> (24 - i * 8);
+    peer->changed = network_now;
+    ++peer->attempts; /* Count failures too, so a full TX queue cannot spin. */
+    send_arp(1, broadcast, unknown, ip);
+}
+
+/* Resolve the IPv4 next hop. A miss starts ARP, never queues the IP packet. */
+int net_resolve(uint32_t destination, uint8_t out[6]) {
+    if (!out || !valid_destination(destination)) return -K_EINVAL;
+    if (!ready) return -K_ENODEV;
+    if ((destination & 0xffffff00U) != 0x06060600U || destination == 0x06060606U) {
+        if (!resolved) return -K_EAGAIN;
+        kmemcpy(out, gateway_mac, 6);
+        return 0;
+    }
+    struct arp_peer *slot = 0;
+    for (unsigned i = 0; i < ARP_PEERS; ++i) {
+        struct arp_peer *peer = &peers[i];
+        if (peer->state == 2 && (uint32_t)(network_now - peer->changed) >= ARP_CACHE_TICKS)
+            peer->state = 0;
+        if (peer->state == 3 && (uint32_t)(network_now - peer->changed) >= ARP_FAILED_TICKS)
+            peer->state = 0;
+        if (!peer->state) { if (!slot) slot = peer; continue; }
+        if (peer->ip != destination) continue;
+        if (peer->state == 2) { kmemcpy(out, peer->mac, 6); return 0; }
+        return peer->state == 3 ? -K_ETIMEDOUT : -K_EAGAIN;
+    }
+    if (!slot) return -K_ENOSPC;
+    slot->ip = destination;
+    slot->state = 1;
+    slot->attempts = 0;
+    peer_request(slot);
+    return -K_EAGAIN;
+}
+
 static unsigned read_be16(const uint8_t *p) {
     return ((unsigned)p[0] << 8) | p[1];
 }
@@ -113,15 +174,11 @@ int net_udp_send(uint32_t destination, uint16_t source_port,
                  uint16_t destination_port, const void *data, size_t length) {
     if (!destination_port || length > NET_UDP_MAX_PAYLOAD || (!data && length))
         return -K_EINVAL;
-    /* Only the gateway is resolved: do not misroute local-subnet peers. */
-    if (!(destination >> 24) || (destination >> 28) >= 14 ||
-        (destination >> 24) == 127 ||
-        ((destination & 0xffffff00U) == 0x06060600U && destination != 0x06060606U))
-        return -K_EINVAL;
-    if (!ready) return -K_ENODEV;
-    if (!resolved) return -K_EAGAIN;
+    uint8_t next_mac[6];
+    int result = net_resolve(destination, next_mac);
+    if (result) return result;
     uint8_t frame[14 + 20 + 8 + NET_UDP_MAX_PAYLOAD] = {0};
-    kmemcpy(frame, gateway_mac, 6);
+    kmemcpy(frame, next_mac, 6);
     kmemcpy(frame + 6, local_mac, 6);
     write_be16(frame + 12, 0x0800);
     uint8_t *ip = frame + 14, *udp = ip + 20;
@@ -181,14 +238,25 @@ int net_udp_receive(uint16_t port, void *data, size_t capacity,
 }
 
 static void receive_ipv4(const uint8_t *frame, size_t length) {
-    if (!resolved || length < 34 || kmemcmp(frame, local_mac, 6) ||
-        kmemcmp(frame + 6, gateway_mac, 6)) return;
+    if (length < 34 || kmemcmp(frame, local_mac, 6)) return;
     const uint8_t *ip = frame + 14;
     unsigned header = (ip[0] & 15) * 4U;
     if ((ip[0] >> 4) != 4 || header < 20 || header > length - 14) return;
     unsigned total = read_be16(ip + 2);
     if (total < header + 8 || total > length - 14 || checksum(ip, header) ||
         (read_be16(ip + 6) & 0xbfff) || !ip[8] || kmemcmp(ip + 16, local_ip, 4)) return;
+    uint32_t source = read_ip(ip + 12);
+    if (!valid_destination(source)) return;
+    const uint8_t *expected = 0;
+    if ((source & 0xffffff00U) != 0x06060600U || source == 0x06060606U) {
+        if (resolved) expected = gateway_mac;
+    } else {
+        for (unsigned i = 0; i < ARP_PEERS; ++i)
+            if (peers[i].state == 2 && peers[i].ip == source &&
+                (uint32_t)(network_now - peers[i].changed) < ARP_CACHE_TICKS)
+                expected = peers[i].mac;
+    }
+    if (!expected || kmemcmp(frame + 6, expected, 6)) return;
     if (ip[9] == 17) {
         receive_udp(ip, header, total);
         return;
@@ -234,6 +302,7 @@ void net_init(const uint8_t mac[6], uint32_t now) {
     for (unsigned i = 0; i < UDP_PORTS; ++i) {
         udp_ports[i].port = 0; udp_ports[i].count = 0;
     }
+    for (unsigned i = 0; i < ARP_PEERS; ++i) peers[i].state = 0;
     resolved = 0;
     ping_state = 0;
     ping_owner = 0;
@@ -247,6 +316,14 @@ void net_init(const uint8_t mac[6], uint32_t now) {
 
 void net_poll(uint32_t now) {
     if (!ready) return;
+    network_now = now;
+    for (unsigned i = 0; i < ARP_PEERS; ++i) {
+        struct arp_peer *peer = &peers[i];
+        if (peer->state != 1 || (uint32_t)(now - peer->changed) < ARP_RETRY_TICKS)
+            continue;
+        if (peer->attempts < ARP_MAX_ATTEMPTS) peer_request(peer);
+        else { peer->state = 3; peer->changed = now; }
+    }
     if (ping_state == 1) ping_elapsed = (uint32_t)(now - ping_started);
     if (resolved) {
 #ifdef AQUAOS_UDP_ECHO_TEST_PORT
@@ -292,7 +369,18 @@ void net_receive(const uint8_t *frame, size_t length) {
     if (!valid_sender(sender_mac) || kmemcmp(frame + 6, sender_mac, 6) ||
         kmemcmp(frame + 38, local_ip, 4)) return;
     if (opcode == 2 && kmemcmp(frame + 32, local_mac, 6)) return;
-    /* Only a solicited, directed reply can populate this first gateway cache. */
+    /* Learn only solicited replies addressed to this interface. */
+    if (opcode == 2 && !kmemcmp(frame, local_mac, 6)) {
+        uint32_t source = read_ip(sender_ip);
+        for (unsigned i = 0; i < ARP_PEERS; ++i) {
+            struct arp_peer *peer = &peers[i];
+            if (peer->state != 1 || peer->ip != source) continue;
+            kmemcpy(peer->mac, sender_mac, 6);
+            peer->state = 2;
+            peer->changed = network_now;
+            break;
+        }
+    }
     if (opcode == 2 && attempts && !resolved &&
         !kmemcmp(frame, local_mac, 6) && !kmemcmp(sender_ip, gateway_ip, 4)) {
         kmemcpy(gateway_mac, sender_mac, 6);

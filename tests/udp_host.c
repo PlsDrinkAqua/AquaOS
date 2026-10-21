@@ -101,11 +101,56 @@ int main(void) {
     assert(net_udp_receive(100,out,3,&ip,&port)==-K_ENOENT);
     assert(net_udp_bind(100)==0);
     assert(net_udp_receive(100,out,3,&ip,&port)==-K_EAGAIN);
-    assert(net_udp_send(0x06060603,100,200,data,1)==-K_EINVAL);
+    assert(net_udp_send(0x06060603,100,200,data,1)==-K_EAGAIN);
     assert(net_udp_send(0x08080808,100,0,data,1)==-K_EINVAL);
     assert(net_udp_send(0x08080808,100,200,0,1)==-K_EINVAL);
     assert(net_udp_send(0x08080808,100,200,data,1473)==-K_EINVAL);
+    /* Resolve a local peer, rejecting unsolicited and mismatched replies. */
+    uint8_t arp[42], peer_mac[6] = {0x52,0x55,6,6,6,3};
+    memcpy(arp, sent, 42); /* Last successful send was the peer ARP request. */
+    memcpy(arp,local_mac,6); memcpy(arp+6,peer_mac,6);
+    arp[21]=2; memcpy(arp+22,peer_mac,6);
+    memcpy(arp+28,(uint8_t[]){6,6,6,3},4);
+    memcpy(arp+32,local_mac,6); memcpy(arp+38,local_ip,4);
+    memcpy(bad,arp,42);bad[28]=7;net_receive(bad,42);
+    assert(net_resolve(0x06060603,out)==-K_EAGAIN);
+    memcpy(bad,arp,42);bad[32]^=1;net_receive(bad,42);
+    assert(net_resolve(0x06060603,out)==-K_EAGAIN);
+    net_receive(arp,42);
+    assert(net_udp_send(0x06060603,100,200,"abc",3)==0);
+    assert(!memcmp(sent,peer_mac,6));
+    reply(frame);memcpy(frame+6,peer_mac,6);net_receive(frame,45);
+    assert(net_udp_receive(100,out,sizeof(out),&ip,&port)==3 && ip==0x06060603);
+    memcpy(frame+6,gateway_mac,6);net_receive(frame,45);
+    assert(net_udp_receive(100,out,sizeof(out),&ip,&port)==-K_EAGAIN);
+    /* Expiry requires fresh resolution; late replies after failure are ignored. */
+    net_poll(ARP_CACHE_TICKS);
+    assert(net_resolve(0x06060603,out)==-K_EAGAIN);
+    net_poll(ARP_CACHE_TICKS+100);net_poll(ARP_CACHE_TICKS+200);
+    net_poll(ARP_CACHE_TICKS+300);
+    net_receive(arp,42);
+    assert(net_resolve(0x06060603,out)==-K_ETIMEDOUT);
+    net_poll(ARP_CACHE_TICKS+600);
+    assert(net_resolve(0x06060603,out)==-K_EAGAIN);
+    net_receive(arp,42);assert(net_resolve(0x06060603,out)==0);
+    /* Simultaneous unresolved peers are bounded; none evicts the gateway. */
+    for(unsigned n=20;n<27;++n) assert(net_resolve(0x06060600+n,out)==-K_EAGAIN);
+    assert(net_resolve(0x0606061b,out)==-K_ENOSPC);
+    assert(net_resolve(0x08080808,out)==0 && !memcmp(out,gateway_mac,6));
+    uint32_t invalid[]={0,0x7f000001,0xe0000001,0xffffffff,0x06060600,0x060606ff,0x0606060f};
+    for(unsigned n=0;n<sizeof(invalid)/sizeof(invalid[0]);++n)
+        assert(net_resolve(invalid[n],out)==-K_EINVAL);
     send_error=-K_EAGAIN;
     assert(net_udp_send(0x08080808,100,200,data,1)==-K_EAGAIN);
-    puts("PASS: UDP wire checksums, all payload sizes, validation, queues and errors");
+    /* Peer retry deadlines wrap, and TX failure still consumes retry budget. */
+    send_error=-K_EAGAIN;
+    net_init((uint8_t[]){6,7,6,7,6,7},UINT32_MAX-50);
+    assert(net_resolve(0x06060603,out)==-K_EAGAIN);
+    assert(peers[0].attempts==1);
+    net_poll(48);assert(peers[0].attempts==1);
+    net_poll(49);assert(peers[0].attempts==2);
+    net_poll(149);assert(peers[0].attempts==3);
+    net_poll(249);assert(net_resolve(0x06060603,out)==-K_ETIMEDOUT);
+    send_error=0;
+    puts("PASS: UDP checksums, validation, queues; peer ARP routing, expiry, retries and limits");
 }

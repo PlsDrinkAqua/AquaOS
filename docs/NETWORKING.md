@@ -2,7 +2,7 @@
 
 AquaOS provides PCI discovery and a polling E1000 driver with receive and
 transmit DMA rings. It sends one diagnostic Ethernet broadcast at boot.
-ARP resolves the static gateway and answers requests for the guest IP.
+ARP resolves the static gateway and local-subnet peers, and answers requests for the guest IP.
 A single IPv4/ICMP boot ping verifies the gateway path after ARP resolves.
 A userspace `ping` command can repeat gateway probes; DHCP is not implemented.
 
@@ -118,8 +118,27 @@ ARP requests for our IP receive a unicast reply. Unknown EtherTypes are ignored
 by the network handler. All network state access currently requires interrupts
 disabled on the single CPU; received buffer pointers are never retained.
 
-This is a static, single-interface milestone: no general ARP table, expiry,
-address conflict detection, VLAN support, DHCP or general IP routing.
+The gateway entry remains pinned for the boot probes. An additional eight-entry
+ARP table resolves unicast peers on the static `6.6.6.0/24` subnet, including
+QEMU's DNS proxy at `6.6.6.3`. `net_resolve(ip, mac)` returns the peer MAC for
+local destinations and the gateway MAC for off-subnet destinations. A cache miss
+sends an ARP request and returns `-K_EAGAIN`; the caller must retry its datagram,
+which is not retained by the kernel. Timer polling retries at one-second
+intervals, with three total attempts, including failed TX submissions. After
+one final response interval, resolution returns `-K_ETIMEDOUT` for a three-second
+cooldown before a new lookup can start. Resolved peer entries expire after
+60 seconds. Tick comparisons tolerate timer wraparound.
+
+Only directed replies matching a pending lookup populate peer entries; requests,
+unsolicited replies and replies after timeout do not update them. Concurrent
+lookups share the bounded table; a full table returns `-K_ENOSPC` until entries
+expire. IPv4 reception checks the Ethernet source against the cached next hop
+for the source IP. Network, subnet broadcast, self, loopback, multicast and
+reserved high-range destinations are rejected. The gateway uses its existing
+boot retry policy and does not expire.
+
+This is a static, single-interface milestone: address conflict detection,
+VLAN support, DHCP and configurable routing remain unimplemented.
 A full TX queue can drop an ARP reply; bounded gateway retries cover lost
 requests without blocking the timer. ARP does not authenticate peer identities.
 
@@ -221,10 +240,12 @@ returns `-K_ERANGE` and leaves the datagram queued. Unbinding discards the queue
 Send returns zero when queued to the NIC, or propagates its error; it does not
 promise delivery. Receive processing performs no memory allocations.
 
-Routing still uses only the resolved gateway MAC. Sends support the gateway
-itself and off-subnet unicast destinations. Other local-subnet destinations,
-loopback, multicast and broadcast are rejected; general ARP/routing, DHCP,
-ICMP errors for closed UDP ports and retransmission remain unimplemented.
+Sends resolve local-subnet peers directly and use the gateway for off-subnet
+unicast destinations. An unresolved next hop returns `EAGAIN` without queuing
+payload data; peer resolution can also return `ETIMEDOUT` or `ENOSPC` as described
+above. Loopback, multicast, broadcast and self destinations are rejected.
+Configurable routing, DHCP, ICMP errors for closed UDP ports and retransmission
+remain unimplemented.
 
 Host verification:
 
@@ -291,7 +312,9 @@ an available ephemeral port in 49152–65535, or specify a nonzero port. Each
 open UDP description can be bound once. A port already bound elsewhere returns
 `EBUSY`; exhaustion of the eight kernel port queues returns `ENOSPC`.
 IP addresses and ports are numeric host integers: `0x06060606` means `6.6.6.6`.
-The existing gateway-only ARP/routing restrictions still apply.
+Local peers are resolved through ARP; off-subnet traffic uses the gateway.
+Retry sends returning `EAGAIN`; unresolved peer lookups can return `ETIMEDOUT`
+or `ENOSPC`.
 
 Socket creation returns a file descriptor; bind returns zero; send and receive
 return payload bytes, including zero for empty datagrams. Errors return -1 and
