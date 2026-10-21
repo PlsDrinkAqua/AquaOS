@@ -4,6 +4,7 @@
 #include <string.h>
 #include <kernel/net.h>
 
+void *kmemset(void *p, int c, size_t n) { return memset(p,c,n); }
 void *kmemcpy(void *d, const void *s, size_t n) { return memcpy(d,s,n); }
 int kmemcmp(const void *a, const void *b, size_t n) { return memcmp(a,b,n); }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }

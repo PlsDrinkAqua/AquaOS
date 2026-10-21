@@ -456,3 +456,22 @@ runner enables `AQUAOS_TASK_DEBUG` for its exit-status assertions and restores
 the normal kernel and ISO afterward, including on failure. Stop other builds
 before running it. Fault diagnostics and the explicit `taskinfo` command remain
 available in normal builds.
+
+
+TCP and HTTP checks:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
+/tmp/aquaos-tcp-host
+sh build.sh
+python3 tools/iso64.py
+python3 tests/http_smoke.py
+python3 tests/dns_smoke.py
+```
+
+Host checks exercise the bounded TCP state machine and malformed wire data with
+sanitizers. QEMU uses a real local HTTP server, verifies an exact binary response
+on a disposable disk, and tests descriptor lifetime and no-NIC failure. The DNS
+fixture also checks hostname-to-HTTP integration with loss and reordered TCP
+data. See [TCP and HTTP](../docs/NETWORKING.md#tcp-active-open-clients-and-http).

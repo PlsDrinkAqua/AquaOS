@@ -31,4 +31,7 @@
 #define K_ENOSYS  38
 #define K_ENOTEMPTY 39
 
+#define K_ECONNRESET 104
+#define K_ECONNREFUSED 111
+
 #endif

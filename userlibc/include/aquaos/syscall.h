@@ -38,6 +38,10 @@ enum {
     SYS_UDP_BIND = 32,
     SYS_UDP_SEND = 33,
     SYS_UDP_RECEIVE = 34,
+    SYS_TCP_SOCKET = 35,
+    SYS_TCP_CONNECT = 36,
+    SYS_TCP_STATUS = 37,
+    SYS_TCP_SHUTDOWN = 38,
 };
 
 #ifdef __cplusplus

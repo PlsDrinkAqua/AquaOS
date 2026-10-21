@@ -247,6 +247,8 @@ void terminal_putchar(char c) {
         size_t spaces = 4 - terminal_column % 4;
         while (spaces--) terminal_putchar(' ');
         return;
+    } else if (c == '\r') {
+        terminal_column = 0;
     } else if (c == '\n') {
         // Move to the next line and reset column.
         terminal_column = 0;

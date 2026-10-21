@@ -9,7 +9,7 @@
 
 typedef enum {
     FD_NONE = 0, FD_STDIN, FD_STDOUT, FD_STDERR, FD_EXT2,
-    FD_PIPE_READ, FD_PIPE_WRITE, FD_UDP,
+    FD_PIPE_READ, FD_PIPE_WRITE, FD_UDP, FD_TCP,
 } fd_type_t;
 
 typedef struct open_file open_file_t;
@@ -29,6 +29,10 @@ int fd_dup(int oldfd);
 int fd_dup2(int oldfd, int newfd);
 int fd_pipe(int pipefd[2]);
 /* Nonblocking UDP operations; called with IRQs disabled. */
+int fd_tcp_socket(void);
+int fd_tcp_connect(int fd, uint32_t ip, uint16_t port);
+int fd_tcp_status(int fd);
+int fd_tcp_shutdown(int fd);
 int fd_udp_socket(void);
 int fd_udp_bind(int fd, uint16_t port);
 int fd_udp_send(int fd, uint32_t ip, uint16_t port, const void *data, size_t length);

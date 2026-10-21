@@ -34,6 +34,12 @@ class DnsPeer:
         self.error = None
         self.queries = {}
         self.arp_dns = False
+        self.syns = 0
+        self.dropped_data = False
+        self.tcp_local = 0
+        self.tcp_remote = 0xfffffff0
+        self.request = b''
+        self.responded = False
 
     def start(self):
         self.thread.start()
@@ -59,6 +65,55 @@ class DnsPeer:
         # Match libslirp: DNS ARP advertises SOURCE, IP replies use GATEWAY.
         self.send(MAC+GATEWAY+b'\x08\x00'+header+udp)
 
+    def tcp(self, frame):
+        ip = frame[14:]
+        total = int.from_bytes(ip[2:4], 'big')
+        t = ip[(ip[0]&15)*4:total]
+        port, destination, seq, ack, offset, flags, window, check, urgent = struct.unpack('!HHIIBBHHH',t[:20])
+        assert destination == 80 and checksum(ip[:20]) == 0
+        assert checksum(ip[12:20]+struct.pack('!BBH',0,6,len(t))+t) == 0
+        data = t[(offset>>4)*4:]
+
+        def send(seq, ack, flags, body=b'', damage=False):
+            segment = struct.pack('!HHIIBBHHH',80,port,seq&0xffffffff,ack&0xffffffff,0x50,flags,4096,0,0)+body
+            addresses = ip[16:20]+ip[12:16]
+            check = checksum(addresses+struct.pack('!BBH',0,6,len(segment))+segment)
+            segment = segment[:16]+struct.pack('!H',check ^ (1 if damage else 0))+segment[18:]
+            header = struct.pack('!BBHHHBBH',0x45,0,20+len(segment),0,0x4000,64,6,0)+addresses
+            header = header[:10]+struct.pack('!H',checksum(header))+header[12:]
+            self.send(MAC+GATEWAY+b'\x08\x00'+header+segment)
+
+        if flags & 2:
+            self.syns += 1
+            self.tcp_local = (seq+1)&0xffffffff
+            if self.syns == 1:
+                return  # Force SYN retransmission.
+            send(self.tcp_remote,self.tcp_local,0x12)
+        elif data:
+            if not self.dropped_data:
+                self.dropped_data = True
+                return  # Force data retransmission.
+            if seq != self.tcp_local:
+                send(self.tcp_remote+1,self.tcp_local,0x10)
+                return
+            self.request += data
+            self.tcp_local = (self.tcp_local+len(data))&0xffffffff
+            send(self.tcp_remote+1,self.tcp_local,0x10)
+            if b'\r\n\r\n' in self.request and not self.responded:
+                assert b'Host: aqua.test:80\r\n' in self.request
+                self.responded = True
+                body = b'HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nDNS HTTP integration PASS\n'
+                start = self.tcp_remote+1
+                send(start,self.tcp_local,0x18,b'CORRUPT',damage=True)
+                send(start+20,self.tcp_local,0x18,body[20:])  # Out of order: retransmit below.
+                send(start,self.tcp_local,0x18,body[:20])
+                send(start+20,self.tcp_local,0x18,body[20:])
+                self.tcp_remote = (start+len(body))&0xffffffff
+                send(self.tcp_remote,self.tcp_local,0x11)
+        elif flags & 1:
+            self.tcp_local = (seq+1)&0xffffffff
+            send(self.tcp_remote+1,self.tcp_local,0x10)
+
     def packet(self, frame):
         if frame[12:14] == b'\x08\x06' and frame[20:22] == b'\x00\x01':
             target = frame[38:42]
@@ -68,6 +123,8 @@ class DnsPeer:
             mac = SOURCE if target[-1] == 3 else GATEWAY
             self.send(MAC+mac+bytes.fromhex('08060001080006040002')+
                       mac+target+MAC+bytes([6,6,6,15]))
+        elif frame[12:14] == b'\x08\x00' and frame[23] == 6:
+            self.tcp(frame)
         elif frame[12:14] == b'\x08\x00' and frame[23] == 17:
             assert self.arp_dns and frame[:6] == SOURCE
             ip = frame[14:]
@@ -130,7 +187,7 @@ def main(no_nic=False):
             stream.truncate(32 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
         batch = tmp / 'install.txt'
-        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/nslookup /bin/nslookup\n')
+        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/nslookup /bin/nslookup\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\n')
         subprocess.run(['debugfs', '-w', '-f', str(batch), str(disk)], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         host, guest = socket.socketpair()
@@ -235,9 +292,12 @@ def main(no_nic=False):
                         assert peer.arp_dns and peer.queries.get('aqua.test') == 2, peer.queries
                         assert peer.queries.get('silent.test') == 3, peer.queries
                         assert peer.queries.get('missing.test') == 10, peer.queries
+                        command('httpget aqua.test', 'DNS HTTP integration PASS')
+                        assert peer.syns == 2 and peer.dropped_data and peer.responded
+                        assert 'CORRUPT' not in screen()
                     assert not peer.error, peer.error
                     print('PASS: DNS no-NIC error' if no_nic else
-                          'PASS: DNS local ARP, compressed CNAME, spoof rejection, retry, errors, timeout and cleanup')
+                          'PASS: DNS and HTTP integration, local ARP, CNAME, loss, reordering, checksums, errors and cleanup')
         finally:
             peer.stop.set()
             peer.thread.join(timeout=2)

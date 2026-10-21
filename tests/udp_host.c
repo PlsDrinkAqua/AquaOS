@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <kernel/net.h>
+void *kmemset(void *p, int c, size_t n) { return memset(p,c,n); }
 void *kmemcpy(void *d, const void *s, size_t n) { return memcpy(d,s,n); }
 int kmemcmp(const void *a, const void *b, size_t n) { return memcmp(a,b,n); }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
@@ -12,6 +13,7 @@ int e1000_transmit(const void *p, size_t n) {
     assert(n <= sizeof(sent)); memcpy(sent,p,n); sent_length=n; return send_error;
 }
 #include "../kernel/kernel/NET/net.c"
+#include "../kernel/kernel/NET/tcp.c"
 /* Independent wire checksum including pseudo header. */
 static unsigned wire_sum(const uint8_t *p, size_t n, unsigned sum) {
     for (size_t i=0;i<n;i+=2) sum += (unsigned)p[i]*256 + (i+1<n?p[i+1]:0);

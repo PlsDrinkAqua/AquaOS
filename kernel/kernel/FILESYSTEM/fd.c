@@ -4,6 +4,7 @@
 #include <kernel/task.h>
 #include <kernel/tty.h>
 #include <kernel/net.h>
+#include <kernel/tcp.h>
 
 #define OPEN_FILE_MAX 64
 #define PIPE_MAX 16
@@ -25,7 +26,7 @@ struct open_file {
     uint16_t refs;
     fd_type_t type;
     int flags;
-    union { ext2_file_t ext2; pipe_object_t *pipe; uint16_t udp_port; } object;
+    union { ext2_file_t ext2; pipe_object_t *pipe; uint16_t udp_port; int tcp_handle; } object;
 };
 
 static open_file_t open_files[OPEN_FILE_MAX];
@@ -82,6 +83,7 @@ static int open_file_put(open_file_t *file) {
     }
     if (file->type == FD_UDP && file->object.udp_port)
         net_udp_unbind(file->object.udp_port);
+    if (file->type == FD_TCP) net_tcp_release(file->object.tcp_handle);
     kmemset(file, 0, sizeof(*file));
     task_preemption_enable();
     return result;
@@ -215,6 +217,7 @@ int fd_read(int fd, void *buf, size_t count) {
     fd_entry_t *e = fd_get(fd);
     int result = 0;
     if (!e) return -K_EBADF;
+    if (e->type == FD_TCP) return net_tcp_read(e->open->object.tcp_handle, buf, count);
     if (e->type == FD_PIPE_READ) {
         pipe_object_t *pipe = e->open->object.pipe;
         if (!buf && count) return -K_EFAULT;
@@ -245,6 +248,7 @@ int fd_write(int fd, const void *buf, size_t count) {
         task_preemption_enable();
         return (int)count;
     }
+    if (e->type == FD_TCP) return net_tcp_send(e->open->object.tcp_handle, buf, count);
     if (e->type == FD_PIPE_WRITE) {
         pipe_object_t *pipe = e->open->object.pipe;
         if (!buf && count) return -K_EFAULT;
@@ -287,11 +291,11 @@ int fd_fcntl(int fd, int command, int flags) {
     if (!entry) return -K_EBADF;
     int current;
     if (entry->type == FD_EXT2) current = entry->open->flags & (O_ACCMODE | O_APPEND);
-    else if (entry->type == FD_UDP) current = O_RDWR;
+    else if (entry->type == FD_UDP || entry->type == FD_TCP) current = O_RDWR;
     else current = entry->type == FD_STDIN || entry->type == FD_PIPE_READ ? 0 : O_WRONLY;
     if (command == 3) return current;
     if (command != 4 || (flags & ~(O_ACCMODE | O_APPEND))) return -K_EINVAL;
-    if (entry->type == FD_UDP && (flags & O_APPEND)) return -K_EINVAL;
+    if ((entry->type == FD_UDP || entry->type == FD_TCP) && (flags & O_APPEND)) return -K_EINVAL;
     if (entry->type == FD_EXT2)
         entry->open->flags = (entry->open->flags & ~O_APPEND) | (flags & O_APPEND);
     return 0;
@@ -347,3 +351,27 @@ int fd_udp_receive(int fd, void *data, size_t capacity, uint32_t *ip, uint16_t *
     if (!file->object.udp_port) return -K_EINVAL;
     return net_udp_receive(file->object.udp_port, data, capacity, ip, port);
 }
+
+
+int fd_tcp_socket(void) {
+    task_t *task=task_current();
+    if(!task) return -K_EINVAL;
+    int fd=fd_find_free(task,0);
+    if(fd<0) return -K_EMFILE;
+    open_file_t *file=open_file_alloc(FD_TCP);
+    if(!file) return -K_ENFILE;
+    int handle=net_tcp_socket();
+    if(handle<0) { file->used=0; return handle; }
+    file->object.tcp_handle=handle;
+    task->fds[fd].type=FD_TCP;task->fds[fd].open=file;
+    return fd;
+}
+static int tcp_handle(int fd) {
+    fd_entry_t *e=fd_get(fd);
+    return e && e->type==FD_TCP ? e->open->object.tcp_handle : -1;
+}
+int fd_tcp_connect(int fd,uint32_t ip,uint16_t port) {
+    return net_tcp_connect(tcp_handle(fd),ip,port);
+}
+int fd_tcp_status(int fd) { return net_tcp_status(tcp_handle(fd)); }
+int fd_tcp_shutdown(int fd) { return net_tcp_shutdown(tcp_handle(fd)); }

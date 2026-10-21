@@ -167,7 +167,7 @@ request replies, bounded retries and timer wraparound:
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
   -Ikernel/include -idirafter libk/include \
-  tests/arp_host.c kernel/kernel/NET/net.c -o /tmp/aquaos-arp-host
+  tests/arp_host.c kernel/kernel/NET/net.c kernel/kernel/NET/tcp.c -o /tmp/aquaos-arp-host
 /tmp/aquaos-arp-host
 ```
 
@@ -438,3 +438,97 @@ It verifies local ARP, outgoing IP/UDP checksums, a dropped first query, invalid
 replies, a compressed CNAME/A answer, NXDOMAIN, truncation, server failure,
 timeout and repeated lookup cleanup, plus a separate no-NIC boot. Development
 disks are untouched.
+
+
+## TCP active-open clients and HTTP
+
+Fresh disks include `httpget`. It accepts a hostname or numeric IPv4, an optional
+absolute request path, and an optional TCP port:
+
+```sh
+httpget example.com /
+httpget 6.6.6.6 / 8000
+httpget example.com / > /response.http
+```
+
+Hostnames use the DNS resolver above. The command sends an HTTP/1.0 GET with
+`Host` and `Connection: close`, then streams the complete response, including
+HTTP headers, to stdout until peer EOF. It returns 0 for a completed transport,
+1 for DNS/network/output errors, and 2 for invalid arguments. It does not follow
+redirects, interpret HTTP status codes, verify Content-Length, decode chunked
+bodies, or support HTTPS/TLS. Paths must begin with `/` and contain printable
+ASCII without spaces; percent-encode characters when necessary. Fresh disks
+include the command; existing disks need `/bin/httpget` installed manually.
+
+`<aquaos/net.h>` exposes a small nonblocking TCP descriptor interface:
+
+```c
+int aquaos_tcp_socket(void);
+int aquaos_tcp_connect(int fd, uint32_t ip, uint16_t port);
+int aquaos_tcp_status(int fd);
+int aquaos_tcp_shutdown(int fd);
+```
+
+Connect starts an active open; poll status until it returns 0, sleeping between
+`EAGAIN` results. Other errors terminate the attempt. Use ordinary `read` and
+`write` for stream data. They can return partial byte counts or `EAGAIN`; read
+returns zero after buffered data has been consumed and the peer's FIN arrives.
+`shutdown` queues a FIN after pending transmit data, while preserving reads.
+Last `close` initiates graceful close when no unread bytes remain; closing with
+unread bytes, or abandoning a pending handshake, aborts the connection. Descriptor
+duplication, fork, exec and process exit share the open-description lifetime.
+Invalid user buffers are validated before data is consumed or queued. `lseek`
+returns `ESPIPE`, `fcntl(F_GETFL)` reports `O_RDWR`, and append is unsupported.
+Syscalls 35–38 implement create/connect/status/shutdown. This is an AquaOS API,
+not a POSIX socket interface; there are no listeners, accept, or blocking mode.
+
+The implementation uses the TCP wire format and active-open/closing states from
+[RFC 9293](https://www.rfc-editor.org/rfc/rfc9293.html). It is a deliberately
+limited first implementation, not a complete RFC-conforming TCP stack. Eight
+fixed connection slots each own an 8192-byte receive ring and one outstanding
+transmit segment of at most 536 bytes, reduced further by a peer's MSS/window.
+The SYN advertises a 1460-byte receive MSS. Receive checks pseudo-header
+checksums, tuple identity, header/options bounds, sequence and acknowledgement
+ranges. It handles partial ACKs, retransmitted data, overlapping segments and
+32-bit sequence wrap; future out-of-order data is discarded with a duplicate
+ACK and must be retransmitted. Windows reopen when the application reads.
+
+A lost SYN, data segment or FIN is retried with exponential backoff starting at
+one second and capped at eight seconds, with at most five successful submissions.
+NIC queue backpressure retries without spinning. Connections time out after
+30 seconds without data/ACK/application progress. Exact-sequence resets abort
+established connections (`ECONNRESET`); valid resets during the handshake report
+`ECONNREFUSED`. Active closes retain their tuple in TIME_WAIT for 120 seconds;
+passive closes release after the final ACK. Detached connections keep their slot
+until close finishes or times out, so bursts of active closes can exhaust slots
+and return `ENOSPC`. Numeric IP routing uses the same ARP/gateway path as UDP.
+
+There is no out-of-order receive queue, adaptive RTT estimation, fast retransmit,
+window scaling, SACK, urgent data, ECN, zero-window persist probes, general
+congestion-control algorithm, ICMP error handling or path-MTU discovery. Sending
+one segment at a time keeps this first client conservative. A zero peer window
+waits for an update and eventually hits the bounded idle timeout. This stack is
+intended for controlled development traffic, including QEMU user networking.
+
+Verification (stop other builds while QEMU tests run):
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
+/tmp/aquaos-tcp-host
+sh build.sh
+python3 tools/iso64.py
+python3 tests/http_smoke.py
+python3 tests/dns_smoke.py
+```
+
+The host test verifies independent wire checksums, malformed/truncated segments,
+retransmissions, partial/future ACKs, windows and receive ring wrap, duplicate
+and overlapping data, sequence/timer wrap, active/passive FIN, reset/refusal,
+timeout and slot limits. The real-server QEMU test binds a local HTTP service
+before boot and verifies repeated transfers, an exact persisted 20 KB binary
+response, resets, refusal and descriptor lifecycle checks. `/tcpcheck` covers
+pointer errors, dup/dup2, fork/exec inheritance and repeated slot exhaustion and
+reuse; no-NIC boot verifies clean failure. The DNS fixture additionally exercises
+hostname-to-HTTP integration, lost SYN/data, out-of-order response segments and
+bad TCP checksums without Internet access. Tests use disposable disks.

@@ -51,6 +51,10 @@ enum {
     SYS_UDP_BIND = 32,
     SYS_UDP_SEND = 33,
     SYS_UDP_RECEIVE = 34,
+    SYS_TCP_SOCKET = 35,
+    SYS_TCP_CONNECT = 36,
+    SYS_TCP_STATUS = 37,
+    SYS_TCP_SHUTDOWN = 38,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -188,6 +192,19 @@ void syscall_handler(interrupt_frame_t *regs)
             regs->eax = (uintptr_t)task_terminal_control(regs->ebx);
             break;
 
+        case SYS_TCP_SOCKET:
+            regs->eax = (uintptr_t)fd_tcp_socket();
+            break;
+        case SYS_TCP_CONNECT:
+            regs->eax = regs->ecx > UINT32_MAX || regs->edx > UINT16_MAX ?
+                (uintptr_t)-K_EINVAL : (uintptr_t)fd_tcp_connect((int)regs->ebx, regs->ecx, regs->edx);
+            break;
+        case SYS_TCP_STATUS:
+            regs->eax = (uintptr_t)fd_tcp_status((int)regs->ebx);
+            break;
+        case SYS_TCP_SHUTDOWN:
+            regs->eax = (uintptr_t)fd_tcp_shutdown((int)regs->ebx);
+            break;
         case SYS_UDP_SOCKET:
             regs->eax = (uintptr_t)fd_udp_socket();
             break;

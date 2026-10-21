@@ -1,4 +1,5 @@
 #include <kernel/net.h>
+#include <kernel/tcp.h>
 #include <kernel/errno.h>
 #include <kernel/e1000.h>
 #include <libk/string.h>
@@ -244,6 +245,22 @@ int net_udp_receive(uint16_t port, void *data, size_t capacity,
     return -K_ENOENT;
 }
 
+int net_ipv4_send(uint32_t destination, unsigned protocol, const void *payload, size_t length) {
+    if ((!payload && length) || length > 1480) return -K_EINVAL;
+    uint8_t frame[1514] = {0};
+    int result = net_resolve(destination, frame);
+    if (result) return result;
+    kmemcpy(frame+6,local_mac,6);write_be16(frame+12,0x0800);
+    uint8_t *ip=frame+14;
+    ip[0]=0x45;write_be16(ip+2,20+length);write_be16(ip+6,0x4000);
+    ip[8]=64;ip[9]=protocol;
+    kmemcpy(ip+12,local_ip,4);
+    for(unsigned i=0;i<4;++i) ip[16+i]=destination>>(24-8*i);
+    write_be16(ip+10,checksum(ip,20));
+    if(length) kmemcpy(ip+20,payload,length);
+    return e1000_transmit(frame,34+length);
+}
+
 static void receive_ipv4(const uint8_t *frame, size_t length) {
     if (length < 34 || kmemcmp(frame, local_mac, 6)) return;
     const uint8_t *ip = frame + 14;
@@ -268,6 +285,7 @@ static void receive_ipv4(const uint8_t *frame, size_t length) {
      * the gateway MAC. Accept either the peer or the resolved gateway. */
     if ((!expected || kmemcmp(frame + 6, expected, 6)) &&
         (!resolved || kmemcmp(frame + 6, gateway_mac, 6))) return;
+    if (ip[9] == 6) { net_tcp_input(ip, header, total); return; }
     if (ip[9] == 17) {
         receive_udp(ip, header, total);
         return;
@@ -314,6 +332,7 @@ void net_init(const uint8_t mac[6], uint32_t now) {
         udp_ports[i].port = 0; udp_ports[i].count = 0;
     }
     for (unsigned i = 0; i < ARP_PEERS; ++i) peers[i].state = 0;
+    net_tcp_init();
     resolved = 0;
     ping_state = 0;
     ping_owner = 0;
@@ -328,6 +347,7 @@ void net_init(const uint8_t mac[6], uint32_t now) {
 void net_poll(uint32_t now) {
     if (!ready) return;
     network_now = now;
+    net_tcp_poll(now);
     for (unsigned i = 0; i < ARP_PEERS; ++i) {
         struct arp_peer *peer = &peers[i];
         if (peer->state != 1 || (uint32_t)(now - peer->changed) < ARP_RETRY_TICKS)

@@ -34,4 +34,7 @@ extern int errno;
 #define EOVERFLOW 75
 #define ETIMEDOUT 110
 
+#define ECONNRESET 104
+#define ECONNREFUSED 111
+
 #endif

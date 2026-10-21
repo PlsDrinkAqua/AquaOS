@@ -14,6 +14,13 @@ int main(void) {
     screen[0] = screen[2001] = 0x1234;
     terminal_buffer = screen + 1;
     terminal_clear();
+    terminal_writestring("abc\rX");
+    assert(terminal_row == 0 && terminal_column == 1);
+    assert((screen[1] & 255) == 'X' && (screen[2] & 255) == 'b');
+    terminal_writestring("\r\nY");
+    assert(terminal_row == 1 && terminal_column == 1);
+    assert((screen[81] & 255) == 'Y');
+    terminal_clear();
     terminal_writestring("hello\033[2;3H\033[7mX\033[0mY");
     assert((screen[83] & 255) == 'X');
     assert((screen[83] >> 8) == 0x70);
