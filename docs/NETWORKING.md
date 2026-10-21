@@ -214,6 +214,8 @@ Fresh development disks include `/bin/ping`. Run:
 ping
 ping 6.6.6.6
 ping -c 2 6.6.6.6
+ping -c 2 example.com
+ping 8.8.8.8
 ```
 
 The default is four requests, with one-second pauses between completed probes.
@@ -221,11 +223,20 @@ The default is four requests, with one-second pauses between completed probes.
 timeout. Output includes sequence numbers, approximate RTT in milliseconds
 (10 ms timer resolution), and transmitted/received counts. Exit status is 0
 when all requests receive replies, 1 on send failure or packet loss, and 2 for
-invalid arguments or unsupported destinations. Only `6.6.6.6` is supported;
-there is no DNS lookup or general destination routing yet.
+invalid arguments. Targets may be ASCII hostnames or dotted-decimal IPv4
+addresses; omitting the target still selects `6.6.6.6`. Hostnames use the DNS
+resolver at `6.6.6.3`, with the resolved numeric address printed before probing.
+Local-subnet unicast targets use ARP directly; off-subnet targets use the gateway.
+Start retries `EAGAIN` for up to three seconds while ARP resolves or the NIC queue
+is busy. Loopback, self, multicast and broadcast destinations remain unsupported.
+DNS and send errors return status 1. A host, firewall or proxy may decline ICMP
+Echo even when DNS and HTTP work, so a timeout alone does not prove it is offline.
+ICMP Destination Unreachable and Time Exceeded messages are not decoded yet;
+such probes report a timeout.
 
 Syscalls 29/30 back `aquaos_ping_start()` and `aquaos_ping_result()` in
-`<aquaos/net.h>`. Start queues one request; result reports EAGAIN while waiting,
+`<aquaos/net.h>`. Start queues one request to a numeric unicast destination, or returns EAGAIN
+while the next-hop ARP lookup is pending; result reports EAGAIN while waiting,
 then returns RTT or ETIMEDOUT and consumes the result. The caller sleeps between
 polls. One process owns the active probe; other callers get EBUSY at start and
 EPERM when reading another process's result. Process exit (including Ctrl+C)
@@ -414,8 +425,8 @@ and writes the result only on success. Errors distinguish unrelated responses
 (`EAGAIN`), malformed data (`EINVAL`), NXDOMAIN/no matching A (`ENOENT`), server
 failure (`EIO`), truncation/complexity limits (`EOVERFLOW`) and timeout
 (`ETIMEDOUT`). This first resolver has no cache, search suffixes, IDNA, IPv6,
-EDNS, TCP fallback, follow-up CNAME queries or DNSSEC. Ping still supports only
-the numeric gateway address.
+EDNS, TCP fallback, follow-up CNAME queries or DNSSEC. Ping accepts hostnames and numeric unicast addresses through the same DNS and
+routing interfaces.
 
 Verification:
 
@@ -532,3 +543,11 @@ pointer errors, dup/dup2, fork/exec inheritance and repeated slot exhaustion and
 reuse; no-NIC boot verifies clean failure. The DNS fixture additionally exercises
 hostname-to-HTTP integration, lost SYN/data, out-of-order response segments and
 bad TCP checksums without Internet access. Tests use disposable disks.
+
+
+Generalized ping is covered by `tests/icmp_host.c` (local and remote routing,
+ARP misses, endpoint matching, timeout without a resolved gateway, invalid
+unicast targets, stale replies and ownership) and `tests/dns_smoke.py` (hostname
+lookup, direct local replies, off-subnet replies, a no-reply destination and
+Ctrl+C followed by another ping). Those QEMU checks use a deterministic Ethernet
+fixture and do not depend on a public host answering ICMP.

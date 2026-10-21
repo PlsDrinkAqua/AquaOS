@@ -5,7 +5,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Gateway-only ICMP API. Numeric IPv4 encoded as 0xAABBCCDD.
+/* Unicast ICMP API using ARP/gateway routing. IPv4 encoded as 0xAABBCCDD.
+ * Start may return EAGAIN while ARP resolves; retry with a bounded wait.
  * Result: round-trip milliseconds or -1 with errno (EAGAIN while pending). */
 int aquaos_ping_start(uint32_t ip);
 int aquaos_ping_result(void);

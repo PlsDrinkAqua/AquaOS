@@ -40,6 +40,7 @@ class DnsPeer:
         self.tcp_remote = 0xfffffff0
         self.request = b''
         self.responded = False
+        self.pings = []
 
     def start(self):
         self.thread.start()
@@ -64,6 +65,23 @@ class DnsPeer:
         header = header[:10]+struct.pack('!H',checksum(header))+header[12:]
         # Match libslirp: DNS ARP advertises SOURCE, IP replies use GATEWAY.
         self.send(MAC+GATEWAY+b'\x08\x00'+header+udp)
+
+    def icmp(self, frame):
+        ip = frame[14:]
+        total = int.from_bytes(ip[2:4], 'big')
+        icmp = ip[(ip[0]&15)*4:total]
+        assert checksum(ip[:20]) == 0 and checksum(icmp) == 0
+        assert icmp[:2] == b'\x08\x00' and icmp[8:] == b'AquaOS ping'
+        destination = ip[16:20]
+        self.pings.append(destination)
+        if destination == bytes([192,0,2,99]):
+            return  # Deterministic no-reply destination.
+        body = b'\0'+icmp[1:2]+b'\0\0'+icmp[4:]
+        body = body[:2]+struct.pack('!H',checksum(body))+body[4:]
+        header = struct.pack('!BBHHHBBH',0x45,0,20+len(body),0,0x4000,64,1,0)+ip[16:20]+ip[12:16]
+        header = header[:10]+struct.pack('!H',checksum(header))+header[12:]
+        mac = SOURCE if destination == bytes([6,6,6,3]) else GATEWAY
+        self.send(MAC+mac+b'\x08\x00'+header+body)
 
     def tcp(self, frame):
         ip = frame[14:]
@@ -123,6 +141,8 @@ class DnsPeer:
             mac = SOURCE if target[-1] == 3 else GATEWAY
             self.send(MAC+mac+bytes.fromhex('08060001080006040002')+
                       mac+target+MAC+bytes([6,6,6,15]))
+        elif frame[12:14] == b'\x08\x00' and frame[23] == 1:
+            self.icmp(frame)
         elif frame[12:14] == b'\x08\x00' and frame[23] == 6:
             self.tcp(frame)
         elif frame[12:14] == b'\x08\x00' and frame[23] == 17:
@@ -187,7 +207,7 @@ def main(no_nic=False):
             stream.truncate(32 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
         batch = tmp / 'install.txt'
-        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/nslookup /bin/nslookup\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\n')
+        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/nslookup /bin/nslookup\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\nwrite {ROOT}/build/x86_64/user/ping /bin/ping\n')
         subprocess.run(['debugfs', '-w', '-f', str(batch), str(disk)], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         host, guest = socket.socketpair()
@@ -295,9 +315,20 @@ def main(no_nic=False):
                         command('httpget aqua.test', 'DNS HTTP integration PASS')
                         assert peer.syns == 2 and peer.dropped_data and peer.responded
                         assert 'CORRUPT' not in screen()
+                        command('ping -c 2 aqua.test', '2 transmitted, 2 received')
+                        command('ping -c 1 6.6.6.3', '1 transmitted, 1 received')
+                        command('ping -c 1 192.0.2.99', '1 transmitted, 0 received')
+                        command('ping 999.1.1.1', 'usage: ping')
+                        type_line('ping -c 100 aqua.test')
+                        wait_for('PING aqua.test: 100 requests')
+                        qmp('human-monitor-command', {'command-line': 'sendkey ctrl-c'})
+                        time.sleep(.3)
+                        command('ping -c 1 6.6.6.3', '1 transmitted, 1 received')
+                        assert peer.pings.count(bytes([192,0,2,42])) >= 2
+                        assert peer.pings.count(bytes([6,6,6,3])) == 2
                     assert not peer.error, peer.error
                     print('PASS: DNS no-NIC error' if no_nic else
-                          'PASS: DNS and HTTP integration, local ARP, CNAME, loss, reordering, checksums, errors and cleanup')
+                          'PASS: DNS, HTTP and hostname/local/remote ping, timeout, Ctrl+C and routing')
         finally:
             peer.stop.set()
             peer.thread.join(timeout=2)

@@ -19,7 +19,7 @@ static uint8_t local_mac[6], gateway_mac[6];
 static int ready, resolved;
 static unsigned attempts;
 static uint32_t last_request;
-static uint32_t ping_started;
+static uint32_t ping_started, ping_destination = 0x06060606U;
 static uint32_t ping_owner, ping_elapsed;
 static uint16_t ping_sequence = 1;
 static int ping_state; /* 0=unsent, 1=waiting, 2=reply, 3=timeout/send failure. */
@@ -113,26 +113,14 @@ static void write_be16(uint8_t *p, unsigned value) {
 static const uint8_t ping_payload[] = "AquaOS ping";
 #define PING_BYTES (8U + sizeof(ping_payload) - 1U)
 
-static int send_ping(void) {
-    uint8_t frame[14 + 20 + PING_BYTES] = {0};
-    kmemcpy(frame, gateway_mac, 6);
-    kmemcpy(frame + 6, local_mac, 6);
-    write_be16(frame + 12, 0x0800);
-    uint8_t *ip = frame + 14, *icmp = ip + 20;
-    ip[0] = 0x45;
-    write_be16(ip + 2, 20 + PING_BYTES);
-    write_be16(ip + 4, 1);
-    write_be16(ip + 6, 0x4000); /* Don't fragment. */
-    ip[8] = 64; ip[9] = 1; /* TTL and ICMP protocol. */
-    kmemcpy(ip + 12, local_ip, 4);
-    kmemcpy(ip + 16, gateway_ip, 4);
-    write_be16(ip + 10, checksum(ip, 20));
+static int send_ping(uint32_t destination) {
+    uint8_t icmp[PING_BYTES] = {0};
     icmp[0] = 8; /* Echo request, code 0. */
     write_be16(icmp + 4, PING_ID);
     write_be16(icmp + 6, ping_sequence);
     kmemcpy(icmp + 8, ping_payload, sizeof(ping_payload) - 1);
     write_be16(icmp + 2, checksum(icmp, PING_BYTES));
-    return e1000_transmit(frame, sizeof(frame));
+    return net_ipv4_send(destination, 1, icmp, sizeof(icmp));
 }
 
 /* Fixed storage keeps receive processing allocation-free in timer context. */
@@ -290,7 +278,7 @@ static void receive_ipv4(const uint8_t *frame, size_t length) {
         receive_udp(ip, header, total);
         return;
     }
-    if (ip[9] != 1 || ping_state != 1 || kmemcmp(ip + 12, gateway_ip, 4)) return;
+    if (ip[9] != 1 || ping_state != 1 || read_ip(ip + 12) != ping_destination) return;
     const uint8_t *icmp = ip + header;
     unsigned bytes = total - header;
     if (bytes != PING_BYTES || checksum(icmp, bytes) || icmp[0] || icmp[1] ||
@@ -337,6 +325,7 @@ void net_init(const uint8_t mac[6], uint32_t now) {
     ping_state = 0;
     ping_owner = 0;
     ping_sequence = 1;
+    ping_destination = 0x06060606U;
     attempts = 0;
     ready = 1;
     last_request = now - ARP_RETRY_TICKS;
@@ -355,23 +344,26 @@ void net_poll(uint32_t now) {
         if (peer->attempts < ARP_MAX_ATTEMPTS) peer_request(peer);
         else { peer->state = 3; peer->changed = now; }
     }
-    if (ping_state == 1) ping_elapsed = (uint32_t)(now - ping_started);
+    if (ping_state == 1) {
+        ping_elapsed = (uint32_t)(now - ping_started);
+        if (ping_elapsed >= PING_TIMEOUT_TICKS) {
+            ping_state = 3;
+            if (!ping_owner) net_log("ICMP: timeout from 6.6.6.6 seq=1\n");
+        }
+    }
     if (resolved) {
 #ifdef AQUAOS_UDP_ECHO_TEST_PORT
         if (ping_state == 2) net_udp_echo_test_poll(now);
 #endif
         if (!ping_state) {
             ping_started = now;
-            if (!send_ping()) {
+            if (!send_ping(0x06060606U)) {
                 ping_state = 1;
                 net_log("ICMP: request to 6.6.6.6 seq=1\n");
             } else {
                 ping_state = 3;
                 net_log("ICMP: send failed for 6.6.6.6\n");
             }
-        } else if (ping_state == 1 && (uint32_t)(now - ping_started) >= PING_TIMEOUT_TICKS) {
-            ping_state = 3;
-            if (!ping_owner) net_log("ICMP: timeout from 6.6.6.6 seq=1\n");
         }
         return;
     }
@@ -437,14 +429,17 @@ int net_gateway_mac(uint8_t out[6]) {
 
 /* One outstanding userspace probe. Syscall entry and timer have IRQs disabled. */
 int net_ping_start(uint32_t pid, uint32_t ip, uint32_t now) {
-    if (ip != 0x06060606U) return -K_EINVAL;
+    if (!valid_destination(ip)) return -K_EINVAL;
     if (!ready) return -K_ENODEV;
-    if (!resolved) return -K_EAGAIN;
     if (ping_owner || ping_state == 1) return -K_EBUSY;
+    uint8_t mac[6];
+    int route = net_resolve(ip, mac);
+    if (route) return route;
     ++ping_sequence;
     if (!ping_sequence) ++ping_sequence;
-    int result = send_ping();
+    int result = send_ping(ip);
     if (result) return result;
+    ping_destination = ip;
     ping_owner = pid;
     ping_started = now;
     ping_elapsed = 0;

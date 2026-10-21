@@ -61,7 +61,7 @@ int main(void) {
     net_receive(reply,53);assert(ping_state==3); /* Late reply ignored. */
     send_error=-11;start(0);assert(ping_state==3);
     send_error=0;start(0);net_receive(reply,53);assert(ping_state==2);
-    assert(net_ping_start(10,0x06060603,0)==-K_EINVAL);
+    assert(net_ping_start(10,0x06060603,0)==-K_EAGAIN);
     assert(net_ping_start(10,0x06060606,100)==0);
     assert(net_ping_start(11,0x06060606,100)==-K_EBUSY);
     assert(net_ping_result(11)==-K_EPERM);
@@ -76,5 +76,32 @@ int main(void) {
     memcpy(reply+26,gateway_ip,4);memcpy(reply+30,local_ip,4);reply[34]=0;fix(reply);
     net_poll(405);net_receive(reply,53);assert(net_ping_result(12)==30);
     assert(net_ping_result(12)==-K_EPERM);
-    puts("PASS: IPv4/ICMP validation, padding, timeout, wrap and send failure");
+    /* Remote destinations use the gateway MAC but match the remote source IP. */
+    start(0);ping_state=3;
+    assert(net_ping_start(42,0x08080808,0)==0);
+    assert(!memcmp(sent,gateway_mac,6) && !memcmp(sent+30,(uint8_t[]){8,8,8,8},4));
+    memcpy(reply,sent,53);memcpy(reply,local_mac,6);memcpy(reply+6,gateway_mac,6);
+    memcpy(reply+26,(uint8_t[]){8,8,4,4},4);memcpy(reply+30,local_ip,4);reply[34]=0;fix(reply);
+    net_receive(reply,53);assert(net_ping_result(42)==-K_EAGAIN);
+    memcpy(reply+26,(uint8_t[]){8,8,8,8},4);fix(reply);
+    net_poll(5);net_receive(reply,53);assert(net_ping_result(42)==50);
+    /* Direct local ARP and timeout work even without a resolved gateway. */
+    net_init((uint8_t[]){6,7,6,7,6,7},0);ping_state=3;
+    assert(net_ping_start(43,0x06060603,0)==-K_EAGAIN);
+    assert(!memcmp(sent+38,(uint8_t[]){6,6,6,3},4));
+    uint8_t arp[42],peer[6]={0x52,0x55,6,6,6,3};memcpy(arp,sent,42);
+    memcpy(arp,local_mac,6);memcpy(arp+6,peer,6);arp[21]=2;
+    memcpy(arp+22,peer,6);memcpy(arp+28,(uint8_t[]){6,6,6,3},4);
+    memcpy(arp+32,local_mac,6);memcpy(arp+38,local_ip,4);net_receive(arp,42);
+    assert(!resolved && net_ping_start(43,0x06060603,0)==0);
+    assert(!memcmp(sent,peer,6));
+    net_poll(300);assert(net_ping_result(43)==-K_ETIMEDOUT);
+    assert(net_ping_start(44,0x06060603,301)==0);
+    memcpy(reply,sent,53);memcpy(reply,local_mac,6);memcpy(reply+6,peer,6);
+    memcpy(reply+26,(uint8_t[]){6,6,6,3},4);memcpy(reply+30,local_ip,4);reply[34]=0;fix(reply);
+    net_poll(302);net_receive(reply,53);assert(net_ping_result(44)==10);
+    uint32_t invalid[]={0,0x7f000001,0xe0000001,0xffffffff,0x06060600,0x060606ff,0x0606060f};
+    for(unsigned j=0;j<sizeof(invalid)/sizeof(invalid[0]);++j)
+        assert(net_ping_start(44,invalid[j],303)==-K_EINVAL);
+    puts("PASS: ICMP validation, remote/local routing, ARP, timeout, ownership and wrap");
 }

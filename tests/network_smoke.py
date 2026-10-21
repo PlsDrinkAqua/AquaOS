@@ -184,7 +184,7 @@ def boot(tmp, disk, label, devices, expected):
                             assert 'UDP user echo FAIL' not in output, output
                         command('ping -c 2 6.6.6.6', '2 transmitted, 2 received')
                         command('ping -c 1 6.6.6.6', '1 transmitted, 1 received')
-                        command('ping 6.6.6.3', 'only gateway 6.6.6.6 is supported')
+                        command('ping 127.0.0.1', 'ping: cannot send (errno=22)')
                         command('ping -c 100 6.6.6.6', 'PING 6.6.6.6: 100 requests')
                         qmp('human-monitor-command', {'command-line': 'sendkey ctrl-c'})
                         time.sleep(.3)
