@@ -366,21 +366,21 @@ if __name__ == '__main__':
     UDP_ECHO = None
 
     def run_tests():
-        if TX_STRESS or UDP_ECHO:
-            try:
-                environment = dict(os.environ)
-                flags = ' -DE1000_TX_STRESS' if TX_STRESS else ''
-                if UDP_ECHO and not UDP_USER:
-                    flags += f' -DAQUAOS_UDP_ECHO_TEST_PORT={UDP_ECHO.port}'
-                environment['AQUAOS64_CC'] = environment.get('AQUAOS64_CC', 'gcc') + flags
-                subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=environment, check=True)
-                subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
-                main()
-            finally:
-                subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
-                subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
-        else:
+        # This suite inspects asynchronous network diagnostics explicitly.
+        try:
+            environment = dict(os.environ)
+            flags = ' -DAQUAOS_NET_DEBUG'
+            if TX_STRESS:
+                flags += ' -DE1000_TX_STRESS'
+            if UDP_ECHO and not UDP_USER:
+                flags += f' -DAQUAOS_UDP_ECHO_TEST_PORT={UDP_ECHO.port}'
+            environment['AQUAOS64_CC'] = environment.get('AQUAOS64_CC', 'gcc') + flags
+            subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=environment, check=True)
+            subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
             main()
+        finally:
+            subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
+            subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
 
     if args.udp_echo or UDP_USER:
         with UdpEcho() as UDP_ECHO:

@@ -6,6 +6,22 @@ ARP resolves the static gateway and local-subnet peers, and answers requests for
 A single IPv4/ICMP boot ping verifies the gateway path after ARP resolves.
 A userspace `ping` command can repeat gateway probes; DHCP is not implemented.
 
+## Console diagnostics
+
+Normal builds keep asynchronous ARP, boot-ping and per-packet RX diagnostics off
+so network activity cannot overwrite a shell prompt or input line. Networking
+and the boot probe still run. To enable those console messages for debugging:
+
+```sh
+AQUAOS64_CC='gcc -DAQUAOS_NET_DEBUG' sh build.sh
+python3 tools/iso64.py
+```
+
+The diagnostic messages described below are visible with that flag enabled.
+`tests/network_smoke.py` and `tests/e1000_rx.py` build with it automatically and
+restore normal kernel/ISO artifacts afterward, even on failure. Stop other
+builds before running either test.
+
 ## Development network
 
 Run `sh qemu.sh`. The launcher creates one E1000 (Intel 82540EM, PCI
@@ -13,7 +29,7 @@ Run `sh qemu.sh`. The launcher creates one E1000 (Intel 82540EM, PCI
 It explicitly sets the subnet to `6.6.6.0/24`, host/gateway to `6.6.6.6`,
 and first DHCP lease to `6.6.6.15`. The subnet's QEMU DNS proxy is `6.6.6.3`.
 The guest now uses static IP `6.6.6.15/24` and resolves gateway `6.6.6.6`.
-DNS is not yet used.
+The userspace DNS resolver uses that proxy by default.
 
 Each launch retains `network.pcap` beside `dev.img` under its new
 `disk/aquaos64.*` directory and prints both paths. Open the capture in Wireshark
@@ -132,8 +148,9 @@ cooldown before a new lookup can start. Resolved peer entries expire after
 Only directed replies matching a pending lookup populate peer entries; requests,
 unsolicited replies and replies after timeout do not update them. Concurrent
 lookups share the bounded table; a full table returns `-K_ENOSPC` until entries
-expire. IPv4 reception checks the Ethernet source against the cached next hop
-for the source IP. Network, subnet broadcast, self, loopback, multicast and
+expire. IPv4 reception accepts the cached peer MAC or the resolved gateway MAC.
+A router can deliver packets from local-subnet sources; QEMU's DNS proxy in
+particular advertises its own ARP MAC but sends IP replies via the gateway MAC. Network, subnet broadcast, self, loopback, multicast and
 reserved high-range destinations are rejected. The gateway uses its existing
 boot retry policy and does not expire.
 
@@ -353,3 +370,71 @@ the same lifetime checks and verifies send failure with `ENODEV`. The kernel
 boot echo probe is disabled in this mode. `--udp-user` and `--udp-echo` select
 separate clients; either may be combined with `--tx-stress`. Normal build
 artifacts are restored afterward. Stop other builds before running this mode.
+
+
+## DNS and nslookup
+
+Fresh development disks include `/bin/nslookup`:
+
+```sh
+nslookup example.com
+```
+
+It queries the QEMU DNS proxy at `6.6.6.3:53` through userspace UDP. Local ARP
+resolution runs automatically; the client retries sends returning `EAGAIN`.
+Success prints the queried name and its first IPv4 address. Usage errors return
+status 2; lookup failures return 1 with a reason and errno. Existing disks need
+the rebuilt command installed, or use `sh qemu.sh` to create a fresh disk.
+
+`<aquaos/dns.h>` exposes `aquaos_dns_lookup(name, server, &address)`, returning
+zero on success or -1 with errno. The server and result use `0xAABBCCDD` IPv4
+integers. The library creates an ephemeral UDP socket and closes it on every
+return path. At the current 100 Hz PIT, each of three attempts allows up to
+three seconds for ARP/TX readiness and three seconds for a response. It sleeps
+between nonblocking calls, processes at most one datagram per tick, and remains
+interruptible by Ctrl+C. Unrelated and malformed replies are ignored within the
+same bounded wait. Network errors, matching negative replies and unsupported
+truncated responses terminate the lookup immediately.
+
+The DNS wire format follows [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035).
+Queries request recursion and A/IN records. Names are ASCII labels of 1–63
+letters, digits, hyphens or underscores, with an optional trailing dot and at
+most 255 encoded bytes. Responses must match the server IP/port, transaction
+ID, normalized question, type and class. Compression decoding checks pointer
+bounds, backward targets, expanded lengths and traversal limits. Only answer
+records belonging to the queried name or its CNAME chain can supply the result;
+authority/additional addresses and unrelated records cannot. Up to eight CNAME
+links are followed within one response, independent of record order. A CNAME
+without its final A answer returns `ENOENT`.
+
+`aquaos_dns_query` and `aquaos_dns_parse` expose the allocation-free wire helpers
+for tests and other clients. The parser validates record bounds across all
+sections, limits processing to 64 records and classic 512-byte UDP responses,
+and writes the result only on success. Errors distinguish unrelated responses
+(`EAGAIN`), malformed data (`EINVAL`), NXDOMAIN/no matching A (`ENOENT`), server
+failure (`EIO`), truncation/complexity limits (`EOVERFLOW`) and timeout
+(`ETIMEDOUT`). This first resolver has no cache, search suffixes, IDNA, IPv6,
+EDNS, TCP fallback, follow-up CNAME queries or DNSSEC. Ping still supports only
+the numeric gateway address.
+
+Verification:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -idirafter userlibc/include tests/dns_host.c \
+  userlibc/aquaos/dns_wire.c userlibc/aquaos/dns.c -o /tmp/aquaos-dns-host
+/tmp/aquaos-dns-host
+sh build.sh
+python3 tools/iso64.py
+python3 tests/dns_smoke.py
+```
+
+Host tests cover query limits, malformed/truncated packets, compressed names,
+CNAME ordering and cycles, question/ID matching, a deterministic mutation corpus,
+ARP readiness, retry/timeout behavior, source filtering and descriptor cleanup.
+The QEMU test uses a disposable disk and a socket-backed Ethernet fixture at
+`6.6.6.3`; it needs no host DNS, Internet connection, TAP or root privileges.
+It verifies local ARP, outgoing IP/UDP checksums, a dropped first query, invalid
+replies, a compressed CNAME/A answer, NXDOMAIN, truncation, server failure,
+timeout and repeated lookup cleanup, plus a separate no-NIC boot. Development
+disks are untouched.

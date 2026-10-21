@@ -4,6 +4,13 @@
 #include <libk/string.h>
 #include <libk/stdio.h>
 
+#ifdef AQUAOS_NET_DEBUG
+#define net_log(...) kprintf(__VA_ARGS__)
+#else
+/* Timer-context diagnostics must not overwrite the interactive prompt. */
+static void net_log(const char *format, ...) { (void)format; }
+#endif
+
 static const uint8_t local_ip[4] = {6, 6, 6, 15};
 static const uint8_t gateway_ip[4] = {6, 6, 6, 6};
 static const uint8_t broadcast[6] = {255,255,255,255,255,255};
@@ -256,7 +263,11 @@ static void receive_ipv4(const uint8_t *frame, size_t length) {
                 (uint32_t)(network_now - peers[i].changed) < ARP_CACHE_TICKS)
                 expected = peers[i].mac;
     }
-    if (!expected || kmemcmp(frame + 6, expected, 6)) return;
+    /* A router may deliver traffic from an on-link source too. In particular,
+     * QEMU's DNS proxy answers ARP with its own MAC but emits IP replies via
+     * the gateway MAC. Accept either the peer or the resolved gateway. */
+    if ((!expected || kmemcmp(frame + 6, expected, 6)) &&
+        (!resolved || kmemcmp(frame + 6, gateway_mac, 6))) return;
     if (ip[9] == 17) {
         receive_udp(ip, header, total);
         return;
@@ -268,7 +279,7 @@ static void receive_ipv4(const uint8_t *frame, size_t length) {
         read_be16(icmp + 4) != PING_ID || read_be16(icmp + 6) != ping_sequence ||
         kmemcmp(icmp + 8, ping_payload, sizeof(ping_payload) - 1)) return;
     ping_state = 2;
-    if (!ping_owner) kprintf("ICMP: reply from 6.6.6.6 seq=1\n");
+    if (!ping_owner) net_log("ICMP: reply from 6.6.6.6 seq=1\n");
 }
 
 static int valid_sender(const uint8_t *mac) {
@@ -333,14 +344,14 @@ void net_poll(uint32_t now) {
             ping_started = now;
             if (!send_ping()) {
                 ping_state = 1;
-                kprintf("ICMP: request to 6.6.6.6 seq=1\n");
+                net_log("ICMP: request to 6.6.6.6 seq=1\n");
             } else {
                 ping_state = 3;
-                kprintf("ICMP: send failed for 6.6.6.6\n");
+                net_log("ICMP: send failed for 6.6.6.6\n");
             }
         } else if (ping_state == 1 && (uint32_t)(now - ping_started) >= PING_TIMEOUT_TICKS) {
             ping_state = 3;
-            if (!ping_owner) kprintf("ICMP: timeout from 6.6.6.6 seq=1\n");
+            if (!ping_owner) net_log("ICMP: timeout from 6.6.6.6 seq=1\n");
         }
         return;
     }
@@ -350,7 +361,7 @@ void net_poll(uint32_t now) {
     last_request = now;
     ++attempts; /* Bound attempts even if the TX queue is full. */
     if (!send_arp(1, broadcast, unknown, gateway_ip))
-        kprintf("ARP: request gateway 6.6.6.6 (%u/3)\n", attempts);
+        net_log("ARP: request gateway 6.6.6.6 (%u/3)\n", attempts);
 }
 
 void net_receive(const uint8_t *frame, size_t length) {
@@ -393,7 +404,7 @@ void net_receive(const uint8_t *frame, size_t length) {
             text[i * 3 + 2] = ':';
         }
         text[17] = 0;
-        kprintf("ARP: gateway 6.6.6.6 MAC=%s\n", text);
+        net_log("ARP: gateway 6.6.6.6 MAC=%s\n", text);
     }
     if (opcode == 1) send_arp(2, sender_mac, sender_mac, sender_ip);
 }

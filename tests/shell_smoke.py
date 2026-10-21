@@ -635,4 +635,13 @@ if __name__ == "__main__":
     parser.add_argument("--file-ops-only", action="store_true", help="exercise cp/mv and offline disk checks")
     parser.add_argument("--path-only", action="store_true", help="exercise shell PATH lookup")
     args = parser.parse_args()
-    run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only, args.file_ops_only, args.path_only)
+    # This harness uses lifecycle diagnostics to observe child exit statuses.
+    try:
+        environment = dict(os.environ)
+        environment['AQUAOS64_CC'] = environment.get('AQUAOS64_CC', 'gcc') + ' -DAQUAOS_TASK_DEBUG'
+        subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=environment, check=True)
+        subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+        run(args.block_size, args.tinycc, args.scrollback_only, args.layout_only, args.selfhost, args.arch, args.compiler_only, args.kilo_only, args.file_ops_only, args.path_only)
+    finally:
+        subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
+        subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)

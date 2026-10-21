@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Boot the built ISO and inject Ethernet frames through a QEMU socket backend."""
 import json
+import os
 import socket
 import struct
 import subprocess
@@ -117,4 +118,12 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        env = dict(os.environ)
+        env['AQUAOS64_CC'] = env.get('AQUAOS64_CC', 'gcc') + ' -DAQUAOS_NET_DEBUG'
+        subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, env=env, check=True)
+        subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)
+        main()
+    finally:
+        subprocess.run(['python3', 'tools/build64.py'], cwd=ROOT, check=True)
+        subprocess.run(['python3', 'tools/iso64.py'], cwd=ROOT, check=True)

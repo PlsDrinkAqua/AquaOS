@@ -98,7 +98,7 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 	// asm volatile ("1: jmp 1b");
 	kprintf("done \n");
     kprintf("About to enter user mode...\n");
-	kprintf("entry: 0x%lx, stack: 0x%lx", (unsigned long)user_entry, (unsigned long)user_stack);
+	kprintf("entry: 0x%lx, stack: 0x%lx\n", (unsigned long)user_entry, (unsigned long)user_stack);
 
 	jump_usermode(user_entry, user_stack);
 

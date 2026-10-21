@@ -59,9 +59,12 @@ _Static_assert(sizeof(rx_descriptor_t) == 16, "E1000 RX descriptor size");
 static volatile rx_descriptor_t *rx_ring;
 static uintptr_t rx_buffers[RX_COUNT];
 static unsigned rx_next;
+#ifdef AQUAOS_NET_DEBUG
 static unsigned rx_packets;
+#endif
 static int rx_ready, rx_fragment;
 
+#ifdef AQUAOS_NET_DEBUG
 static void format_mac(const uint8_t *bytes, char out[18]) {
     static const char hex[] = "0123456789abcdef";
     for (unsigned i = 0; i < 6; ++i) {
@@ -71,6 +74,7 @@ static void format_mac(const uint8_t *bytes, char out[18]) {
     }
     out[17] = '\0';
 }
+#endif
 
 static uint32_t read_register(unsigned offset) {
     return registers[offset / sizeof(uint32_t)];
@@ -247,12 +251,14 @@ void e1000_poll(void) {
             length >= 14 && length <= RX_BUFFER_SIZE) {
             const uint8_t *packet = (const uint8_t *)(KERNEL_DIRECT_BASE + rx_buffers[rx_next]);
             net_receive(packet, length);
+#ifdef AQUAOS_NET_DEBUG
             char destination[18], source[18];
             format_mac(packet, destination);
             format_mac(packet + 6, source);
             unsigned type = ((unsigned)packet[12] << 8) | packet[13];
             kprintf("E1000: RX #%u len=%u type=0x%x\n", ++rx_packets, length, type);
             kprintf("  src=%s dst=%s\n", source, destination);
+#endif
         }
         /* This first driver drops fragmented/error frames and recycles them. */
         rx_fragment = !(status & RX_END);

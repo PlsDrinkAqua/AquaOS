@@ -431,3 +431,28 @@ python3 tests/network_smoke.py --udp-user
 ```
 
 See [userspace UDP descriptors](../docs/NETWORKING.md#userspace-udp-descriptors).
+
+
+DNS resolver checks:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -idirafter userlibc/include tests/dns_host.c \
+  userlibc/aquaos/dns_wire.c userlibc/aquaos/dns.c -o /tmp/aquaos-dns-host
+/tmp/aquaos-dns-host
+sh build.sh
+python3 tools/iso64.py
+python3 tests/dns_smoke.py
+```
+
+The host test validates DNS packets and client retries with sanitizers. The
+QEMU test uses a deterministic Ethernet DNS peer, exercises local ARP and the
+installed `nslookup` command, and checks no-NIC behavior. It uses disposable
+disks and requires no Internet DNS. See [DNS and nslookup](../docs/NETWORKING.md#dns-and-nslookup).
+
+
+Normal builds omit routine task start/exec/spawn/exit messages. The shell smoke
+runner enables `AQUAOS_TASK_DEBUG` for its exit-status assertions and restores
+the normal kernel and ISO afterward, including on failure. Stop other builds
+before running it. Fault diagnostics and the explicit `taskinfo` command remain
+available in normal builds.

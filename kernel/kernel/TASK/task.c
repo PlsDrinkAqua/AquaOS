@@ -595,11 +595,13 @@ int task_start_init(const char *path, uintptr_t *entry_out, uintptr_t *stack_out
         *stack_out = current_task->user_stack_top;
     }
 
+#ifdef AQUAOS_TASK_DEBUG
     kprintf("task: pid=%u started %s entry=0x%lx stack=0x%lx\n",
             current_task->pid,
             current_task->image_path,
             (unsigned long)current_task->entry,
             (unsigned long)current_task->user_stack_top);
+#endif
 
     return 0;
 }
@@ -644,10 +646,12 @@ int task_exec_current(const char *path, const char *const *argv, const char *con
     regs->eax = 0;
     current_task->state = TASK_RUNNING;
 
+#ifdef AQUAOS_TASK_DEBUG
     kprintf("task: pid=%u exec %s entry=0x%lx\n",
             current_task->pid,
             current_task->image_path,
             (unsigned long)current_task->entry);
+#endif
 
     return 0;
 }
@@ -701,11 +705,13 @@ int task_spawn_current(const char *path, interrupt_frame_t *regs) {
     task_publish_child(child, parent);
     regs->eax = child->pid;
 
+#ifdef AQUAOS_TASK_DEBUG
     kprintf("task: pid=%u spawned child pid=%u image=%s entry=0x%lx\n",
             parent->pid,
             child->pid,
             child->image_path,
             (unsigned long)child->entry);
+#endif
 
     return 0;
 }
@@ -971,10 +977,12 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
         }
     }
 
+#ifdef AQUAOS_TASK_DEBUG
     kprintf("\ntask: pid=%u exited from %s with status %d\n",
             exiting->pid,
             exiting->image_path,
             status);
+#endif
 
     parent = task_find_by_pid(exiting->parent_pid);
     if (parent) {

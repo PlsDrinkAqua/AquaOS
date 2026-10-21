@@ -122,6 +122,8 @@ int main(void) {
     reply(frame);memcpy(frame+6,peer_mac,6);net_receive(frame,45);
     assert(net_udp_receive(100,out,sizeof(out),&ip,&port)==3 && ip==0x06060603);
     memcpy(frame+6,gateway_mac,6);net_receive(frame,45);
+    assert(net_udp_receive(100,out,sizeof(out),&ip,&port)==3 && ip==0x06060603);
+    frame[6]^=2;net_receive(frame,45);
     assert(net_udp_receive(100,out,sizeof(out),&ip,&port)==-K_EAGAIN);
     /* Expiry requires fresh resolution; late replies after failure are ignored. */
     net_poll(ARP_CACHE_TICKS);
