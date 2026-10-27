@@ -456,23 +456,63 @@ disks are untouched.
 
 ## TCP active-open clients and HTTP
 
-Fresh disks include `httpget`. It accepts a hostname or numeric IPv4, an optional
-absolute request path, and an optional TCP port:
+Fresh disks include `httpget`. It accepts an HTTP URL, or the earlier
+hostname/path/port form. Output now contains **only the decoded body**, so
+shell redirection and `-o` save usable files rather than HTTP headers:
 
 ```sh
+httpget http://example.com/
+httpget -o /hello.c http://6.6.6.6:8000/hello.c
 httpget example.com /
-httpget 6.6.6.6 / 8000
-httpget example.com / > /response.http
+httpget 6.6.6.6 /hello.c 8000 > /hello.c
 ```
 
-Hostnames use the DNS resolver above. The command sends an HTTP/1.0 GET with
-`Host` and `Connection: close`, then streams the complete response, including
-HTTP headers, to stdout until peer EOF. It returns 0 for a completed transport,
-1 for DNS/network/output errors, and 2 for invalid arguments. It does not follow
-redirects, interpret HTTP status codes, verify Content-Length, decode chunked
-bodies, or support HTTPS/TLS. Paths must begin with `/` and contain printable
-ASCII without spaces; percent-encode characters when necessary. Fresh disks
-include the command; existing disks need `/bin/httpget` installed manually.
+`-o file` downloads to a new `file.httpget.N` in the same directory, using
+exclusive creation to preserve existing temporary files. Only a complete,
+successful response replaces the destination through rename. HTTP errors,
+truncation, malformed framing, output/close errors, and rename errors return
+failure and remove the new temporary file while preserving the old destination.
+Up to 100 temporary names are tried. The full staging path must fit in 255
+bytes, and its parent directory must already exist. `-o -` uses stdout.
+Shell `>` redirection opens/truncates its destination before the command runs;
+use `-o` when a failed download must preserve an existing file. Ctrl+C uses the
+OS's process termination path and can leave a partial `.httpget.N` file; a
+subsequent download skips it. Rename is not crash-atomic on this ext2 filesystem.
+
+The command sends HTTP/1.1 GET with `Host`, `Connection: close`, and
+`Accept-Encoding: identity`. Hostnames use the interface's configured DNS.
+It parses HTTP/1.0 and HTTP/1.1 status/header lines, accepts successful 2xx
+responses except unsolicited 206 partial content, and reports other statuses
+as errors. Up to eight informational responses precede the final response;
+protocol upgrades are unsupported. Header names are case insensitive. Header
+lines are limited to 2047 bytes and each response's combined header block,
+including informational responses, to 16 KiB.
+
+Content-Length bodies must contain exactly the advertised number of bytes;
+EOF before that boundary is an error. Chunked bodies are decoded incrementally,
+including bounded extensions and trailers, and must finish with a zero chunk
+and complete trailers. Duplicate Content-Length, conflicting length/transfer
+headers, unsupported transfer/content encodings, malformed chunks, and framing
+fields in trailers are rejected. When neither length nor transfer encoding is
+provided, the body ends at peer EOF; early EOF cannot be distinguished from
+success for such close-delimited responses. Binary bytes are preserved. Framed
+responses finish without waiting for the server to close the connection.
+
+301, 302, 303, 307, and 308 follow `Location` up to five times, including HTTP
+absolute URLs, scheme-relative URLs, absolute/relative paths, query-only and
+fragment-only references. Literal dot segments are removed when resolving
+redirects; percent encoding and query bytes are retained. Every hop gets a fresh
+connection and DNS lookup as needed. Requests contain no credentials or cookies.
+Paths must be printable ASCII without spaces; percent-encode other bytes.
+URLs support DNS hostnames or IPv4 and ports 1–65535. IPv6 and userinfo are
+unsupported. HTTPS URLs and redirects fail explicitly: TLS is not implemented.
+Connect, request writes, and response reads have bounded 30-second idle waits.
+
+Exit status is 0 for a complete successful response, 1 for HTTP, protocol,
+DNS/network or output errors, and 2 for invalid command arguments. Existing
+disks need the rebuilt `/bin/httpget`; fresh disks install it automatically.
+See [HTTP framing](https://www.rfc-editor.org/rfc/rfc9112.html) and
+[URI resolution](https://www.rfc-editor.org/rfc/rfc3986.html).
 
 `<aquaos/net.h>` exposes a small nonblocking TCP descriptor interface:
 
@@ -528,6 +568,9 @@ Verification (stop other builds while QEMU tests run):
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -idirafter userlibc/include tests/httpget_host.c -o /tmp/aquaos-httpget-host
+/tmp/aquaos-httpget-host
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
   -Ikernel/include -idirafter libk/include -idirafter userlibc/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
 /tmp/aquaos-tcp-host
 sh build.sh
@@ -540,8 +583,10 @@ The host test verifies independent wire checksums, malformed/truncated segments,
 retransmissions, partial/future ACKs, windows and receive ring wrap, duplicate
 and overlapping data, sequence/timer wrap, active/passive FIN, reset/refusal,
 timeout and slot limits. The real-server QEMU test binds a local HTTP service
-before boot and verifies repeated transfers, an exact persisted 20 KB binary
-response, resets, refusal and descriptor lifecycle checks. `/tcpcheck` covers
+before boot and verifies repeated transfers, exact persisted 20 KB decoded binary
+bodies, chunked/trailers, relative and absolute redirects, status failures,
+truncation, preservation of existing files, temporary-name collisions and cleanup,
+resets, refusal and descriptor lifecycle checks. `/tcpcheck` covers
 pointer errors, dup/dup2, fork/exec inheritance and repeated slot exhaustion and
 reuse; no-NIC boot verifies clean failure. The DNS fixture additionally exercises
 hostname-to-HTTP integration, lost SYN/data, out-of-order response segments and

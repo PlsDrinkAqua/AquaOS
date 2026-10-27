@@ -492,3 +492,25 @@ changes, and no-NIC reporting. `--live-dns` additionally checks `google.com`
 through the guest and captures the returned DNS answer; this optional mode
 needs working upstream DNS and may report synthetic answers supplied by a host
 proxy. See [DHCP and live DNS](../docs/NETWORKING.md#dhcp-configuration-and-netinfo).
+
+
+HTTP downloader parser and output checks:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -idirafter userlibc/include tests/httpget_host.c -o /tmp/aquaos-httpget-host
+/tmp/aquaos-httpget-host
+sh build.sh
+python3 tools/iso64.py
+python3 tests/http_smoke.py
+python3 tests/dns_smoke.py
+```
+
+The host test feeds fragmented binary responses, informational statuses,
+Content-Length, chunked data/extensions/trailers, redirects, malformed and
+truncated messages, and injects short I/O, timeouts, output/close/rename errors.
+The QEMU test checks body-only stdout, URL and legacy syntax, exact 20 KB files,
+redirects, chunked decoding, preservation of existing files on failure,
+temporary-name collisions/cleanup, and the TCP descriptor regressions. It needs
+no Internet and uses a disposable ext2 disk. See
+[HTTP downloader](../docs/NETWORKING.md#tcp-active-open-clients-and-http).

@@ -15,9 +15,34 @@ SOURCE = bytes.fromhex('020000000001')
 GATEWAY = bytes.fromhex('020000000006')
 
 
-def response(path):
-    body = bytes((i*37+11)&255 for i in range(20000)) if path == '/large' else b'AquaOS HTTP transfer PASS\n'
-    return (b'HTTP/1.0 200 OK\r\nContent-Length: '+str(len(body)).encode()+
+def payload(path):
+    return bytes((i*37+11)&255 for i in range(20000)) if path in ('/large', '/chunked') else b'AquaOS HTTP transfer PASS\n'
+
+
+def response(path, port=80):
+    if path == '/redirect':
+        return b'HTTP/1.1 302 Found\r\nLocation: ./chunked\r\nContent-Length: 0\r\n\r\n'
+    if path == '/absolute':
+        return f'HTTP/1.1 307 Temporary Redirect\r\nLocation: http://6.6.6.6:{port}/large\r\nContent-Length: 0\r\n\r\n'.encode()
+    if path == '/loop':
+        return b'HTTP/1.1 301 Moved\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n'
+    if path == '/notfound':
+        return b'HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\noops'
+    if path == '/truncated':
+        return b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'
+    if path == '/badchunk':
+        return b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcXX'
+    if path == '/tohttps':
+        return b'HTTP/1.1 302 Found\r\nLocation: https://example.com/\r\nContent-Length: 0\r\n\r\n'
+    if path == '/chunked':
+        body = payload(path)
+        chunks = [body[i:i+137] for i in range(0,len(body),137)]
+        return (b'HTTP/1.1 103 Early Hints\r\nLink: </file>\r\n\r\n'
+                b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n' +
+                b''.join(f'{len(chunk):x};part=yes\r\n'.encode()+chunk+b'\r\n' for chunk in chunks)+
+                b'0\r\nX-Checksum: fixture\r\n\r\n')
+    body = payload(path)
+    return (b'HTTP/1.1 200 OK\r\nContent-Length: '+str(len(body)).encode()+
             b'\r\nConnection: close\r\n\r\n'+body)
 
 
@@ -52,14 +77,14 @@ class HttpServer:
                         request += data
                         assert len(request) < 4096
                     method, path, version = request.split(b'\r\n',1)[0].split()
-                    assert method == b'GET' and version == b'HTTP/1.0'
+                    assert method == b'GET' and version == b'HTTP/1.1'
                     assert f'Host: 6.6.6.6:{self.port}\r\n'.encode() in request
                     path = path.decode()
                     self.paths.append(path)
                     if path == '/reset':
                         connection.setsockopt(socket.SOL_SOCKET,socket.SO_LINGER,struct.pack('ii',1,0))
                     else:
-                        connection.sendall(response(path))
+                        connection.sendall(response(path,self.port))
         except Exception as error:
             self.error = error
 
@@ -85,7 +110,7 @@ def main(server, no_nic=False):
             stream.truncate(32 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
         batch = tmp / 'install.txt'
-        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\nwrite {ROOT}/build/x86_64/user/tcpcheck /bin/tcpcheck\n')
+        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\nwrite {ROOT}/build/x86_64/user/tcpcheck /bin/tcpcheck\nwrite {ROOT}/build/x86_64/user/echo /bin/echo\n')
         subprocess.run(['debugfs', '-w', '-f', str(batch), str(disk)], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         path = tmp / 'qmp'
@@ -153,7 +178,7 @@ def main(server, no_nic=False):
 
                     def type_line(line):
                         for c in line:
-                            key = {' ': 'spc', '.': 'dot', '-': 'minus', '/': 'slash', '>': 'shift-dot'}.get(c, c)
+                            key = {' ': 'spc', '.': 'dot', '-': 'minus', '/': 'slash', '>': 'shift-dot', ':': 'shift-semicolon'}.get(c, c)
                             qmp('human-monitor-command', {'command-line': 'sendkey ' + key})
                             time.sleep(.06)
                         qmp('human-monitor-command', {'command-line': 'sendkey ret'})
@@ -177,12 +202,24 @@ def main(server, no_nic=False):
                     if no_nic:
                         command('httpget 6.6.6.6', 'connection failed (errno=19)')
                     else:
-                        command(f'httpget 6.6.6.6 /ok {server.port}', 'AquaOS HTTP transfer PASS')
+                        text = command(f'httpget 6.6.6.6 /ok {server.port}', 'AquaOS HTTP transfer PASS')
+                        assert 'HTTP/1.' not in text
                         # Exercise more sockets than the table contains, including
                         # passive close and last-close cleanup between requests.
                         for _ in range(9):
                             command(f'httpget 6.6.6.6 /ok {server.port}', 'AquaOS HTTP transfer PASS')
-                        command(f'httpget 6.6.6.6 /large {server.port} > /http.bin', 'AquaOS>')
+                        command(f'httpget -o /http.bin http://6.6.6.6:{server.port}/large', 'AquaOS>')
+                        command(f'httpget -o /chunk.bin http://6.6.6.6:{server.port}/chunked', 'AquaOS>')
+                        command(f'httpget -o /redir.bin http://6.6.6.6:{server.port}/redirect', 'AquaOS>')
+                        command(f'httpget -o /abs.bin http://6.6.6.6:{server.port}/absolute', 'AquaOS>')
+                        command(f'httpget -o /http.bin http://6.6.6.6:{server.port}/notfound', 'HTTP status 404')
+                        command(f'httpget -o /http.bin http://6.6.6.6:{server.port}/truncated', 'incomplete HTTP body')
+                        command(f'httpget -o /http.bin http://6.6.6.6:{server.port}/badchunk', 'invalid chunk terminator')
+                        command(f'httpget -o /http.bin http://6.6.6.6:{server.port}/loop', 'too many redirects')
+                        command(f'httpget -o /http.bin http://6.6.6.6:{server.port}/tohttps', 'HTTPS requires TLS')
+                        command('echo occupied > /keep.httpget.0', 'AquaOS>')
+                        command(f'httpget -o /keep http://6.6.6.6:{server.port}/ok', 'AquaOS>')
+                        command(f'httpget 6.6.6.6 /ok {server.port} > /stdout.bin', 'AquaOS>')
                         command(f'httpget 6.6.6.6 /reset {server.port}', 'connection failed (errno=104)')
                         # A bound but non-listening host port reliably refuses.
                         command(f'httpget 6.6.6.6 / {server.refused_port}', 'connection failed (errno=111)')
@@ -191,11 +228,19 @@ def main(server, no_nic=False):
             if not no_nic:
                 saved = subprocess.check_output(['debugfs','-R','cat /http.bin',str(disk)],
                                                 stderr=subprocess.DEVNULL)
-                assert saved == response('/large'), (len(saved), len(response('/large')))
-                assert server.paths == ['/ok']*10+['/large','/reset'], server.paths
+                assert saved == payload('/large'), (len(saved), len(payload('/large')))
+                for name, expected in [('chunk.bin',payload('/chunked')), ('redir.bin',payload('/chunked')),
+                                       ('abs.bin',payload('/large')), ('keep',payload('/ok')),
+                                       ('keep.httpget.0',b'occupied\n'), ('stdout.bin',payload('/ok'))]:
+                    contents = subprocess.check_output(['debugfs','-R',f'cat /{name}',str(disk)],stderr=subprocess.DEVNULL)
+                    assert contents == expected, (name,len(contents),len(expected),contents[:80])
+                listing = subprocess.check_output(['debugfs','-R','ls -p /',str(disk)],stderr=subprocess.DEVNULL).decode()
+                assert listing.count('.httpget.') == 1, listing
+                assert server.paths == ['/ok']*10 + ['/large','/chunked','/redirect','/chunked',
+                    '/absolute','/large','/notfound','/truncated','/badchunk'] + ['/loop']*6 + ['/tohttps','/ok','/ok','/reset'], server.paths
                 assert not server.error, server.error
             print('PASS: TCP no-NIC and descriptor lifetime' if no_nic else
-                  'PASS: real HTTP, exact 20KB binary transfer, repeated close, reset, refusal and TCP descriptors')
+                  'PASS: HTTP URLs, body-only output, atomic files, chunked/trailers, redirects, HTTP errors, truncation, reset and TCP descriptors')
         finally:
             if proc.poll() is None:
                 proc.terminate()
