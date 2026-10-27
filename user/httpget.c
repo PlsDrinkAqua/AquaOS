@@ -40,7 +40,7 @@ int main(int argc,char **argv) {
              (*p>='0' && *p<='9') || *p=='.' || *p=='-' || *p=='_')) goto usage;
     for(const char *p=path;*p;++p) if((unsigned char)*p<=32 || (unsigned char)*p>=127) goto usage;
     uint32_t ip;
-    if(ipv4(host,&ip) && aquaos_dns_lookup(host,AQUAOS_DNS_SERVER,&ip)<0) {
+    if(ipv4(host,&ip) && aquaos_dns_lookup(host,0,&ip)<0) {
         fprintf(stderr,"httpget: DNS failed (errno=%d)\n",errno);return 1;
     }
     char request[1400];

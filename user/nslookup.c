@@ -8,7 +8,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     uint32_t ip;
-    if (aquaos_dns_lookup(argv[1], AQUAOS_DNS_SERVER, &ip) < 0) {
+    if (aquaos_dns_lookup(argv[1], 0, &ip) < 0) {
         const char *reason = "lookup failed";
         if (errno == ENOENT) reason = "name not found or no IPv4 answer";
         else if (errno == ETIMEDOUT) reason = "timed out";

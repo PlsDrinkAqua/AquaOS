@@ -7,6 +7,13 @@ int aquaos_dns_lookup(const char *name, uint32_t server, uint32_t *address) {
     static uint16_t next_id = 0xa900;
     unsigned char query[272], reply[1472];
     if (!address) { errno = EINVAL; return -1; }
+    if (!server) {
+        aquaos_net_info info;
+        if (aquaos_get_net_info(&info) < 0) return -1;
+        if (!(info.flags & AQUAOS_NET_PRESENT)) { errno = ENODEV; return -1; }
+        server = info.dns;
+        if (!server) { errno = ENOENT; return -1; }
+    }
     uint16_t id = ++next_id;
     int bytes = aquaos_dns_query(name, id, query, sizeof(query));
     if (bytes < 0) return -1;

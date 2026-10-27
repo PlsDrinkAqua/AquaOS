@@ -1,13 +1,14 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <aquaos/net_abi.h>
 
-/* Single interface, static QEMU network. All calls run with IRQs disabled.
+/* Single interface with DHCP and a static development fallback. All calls run with IRQs disabled.
  * Receive buffers are borrowed only for the duration of net_receive(). */
 void net_init(const uint8_t mac[6], uint32_t now);
 void net_receive(const uint8_t *frame, size_t length);
 void net_poll(uint32_t now);
-/* Resolve a unicast next hop. Local /24 peers use ARP; remote IPs use gateway.
+/* Resolve a unicast next hop. Local subnet peers use ARP; remote IPs use gateway.
  * Returns 0 and MAC, EAGAIN while resolving, ETIMEDOUT during failure cooldown,
  * ENOSPC if all eight peer slots are occupied. Retry send after EAGAIN. */
 int net_resolve(uint32_t destination, uint8_t out[6]);
@@ -39,3 +40,6 @@ int net_udp_receive(uint16_t port, void *data, size_t capacity,
 void net_udp_echo_test_reset(void);
 void net_udp_echo_test_poll(uint32_t now);
 #endif
+
+uint32_t net_local_ip(void);
+void net_get_info(aquaos_net_info *out);

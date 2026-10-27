@@ -25,7 +25,14 @@ static int parse_ip(const char *s, uint32_t *ip) {
 
 int main(int argc, char **argv) {
     unsigned count = 4;
+    char default_target[16];
+    aquaos_net_info info;
     const char *target = "6.6.6.6";
+    if (argc == 1 && !aquaos_get_net_info(&info) && info.gateway) {
+        snprintf(default_target, sizeof(default_target), "%u.%u.%u.%u", info.gateway >> 24,
+                 (info.gateway >> 16) & 255, (info.gateway >> 8) & 255, info.gateway & 255);
+        target = default_target;
+    }
     if (argc == 4 && !strcmp(argv[1], "-c")) {
         count = 0;
         for (const char *p = argv[2]; *p; ++p) {
@@ -43,7 +50,7 @@ int main(int argc, char **argv) {
         for (const char *p = target; *p; ++p)
             if ((*p < '0' || *p > '9') && *p != '.') numeric = 0;
         if (numeric) goto usage;
-        if (aquaos_dns_lookup(target, AQUAOS_DNS_SERVER, &address) < 0) {
+        if (aquaos_dns_lookup(target, 0, &address) < 0) {
             fprintf(stderr, "ping: DNS lookup failed (errno=%d)\n", errno);
             return 1;
         }

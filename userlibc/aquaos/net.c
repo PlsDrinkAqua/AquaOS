@@ -32,3 +32,7 @@ int aquaos_tcp_connect(int fd,uint32_t ip,uint16_t port) {
 }
 int aquaos_tcp_status(int fd) { return aquaos_sysret(aquaos_syscall1(SYS_TCP_STATUS,fd)); }
 int aquaos_tcp_shutdown(int fd) { return aquaos_sysret(aquaos_syscall1(SYS_TCP_SHUTDOWN,fd)); }
+
+int aquaos_get_net_info(aquaos_net_info *info) {
+    return aquaos_sysret(aquaos_syscall1(SYS_NET_INFO, (intptr_t)info));
+}

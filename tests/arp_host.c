@@ -7,10 +7,12 @@
 void *kmemset(void *p, int c, size_t n) { return memset(p,c,n); }
 void *kmemcpy(void *d, const void *s, size_t n) { return memcpy(d,s,n); }
 int kmemcmp(const void *a, const void *b, size_t n) { return memcmp(a,b,n); }
+int e1000_link_up(void) { return 1; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 static uint8_t sent[64];
 static unsigned sends;
 int e1000_transmit(const void *frame, size_t n) {
+    if (n >= 42 && ((const uint8_t *)frame)[23] == 17 && ((const uint8_t *)frame)[35] == 68) return 0;
     assert(n <= sizeof(sent)); memcpy(sent, frame, n); ++sends; return 0;
 }
 static const uint8_t guest[6] = {6,7,6,7,6,7};

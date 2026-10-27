@@ -14,7 +14,8 @@ extern "C" {
 int aquaos_dns_query(const char *name, uint16_t id, void *packet, size_t capacity);
 int aquaos_dns_parse(const void *packet, size_t length, const char *name,
                      uint16_t id, uint32_t *address);
-/* Blocking bounded resolver over nonblocking UDP. Three attempts, each with
+/* Server zero uses the current interface DNS configuration.
+ * Blocking bounded resolver over nonblocking UDP. Three attempts, each with
  * up to three seconds for ARP/TX and three seconds for a reply (100 Hz PIT).
  * No DNS cache, search suffixes, EDNS, TCP fallback, or DNSSEC. */
 int aquaos_dns_lookup(const char *name, uint32_t server, uint32_t *address);

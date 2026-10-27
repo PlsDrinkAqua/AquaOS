@@ -9,7 +9,8 @@
 static unsigned char query[512], response[512];
 static size_t query_length, response_length;
 static unsigned calls, ticks, closes, receives;
-static int mode;
+static int mode, config_mode;
+static uint32_t configured_dns = AQUAOS_DNS_SERVER;
 static void put(unsigned char *p, unsigned n) { p[0]=n>>8; p[1]=n; }
 static void answer(const char *name) {
     int n=aquaos_dns_query(name,0x1234,response,sizeof(response)); assert(n>0);
@@ -24,10 +25,16 @@ static int parse(void) {
     else assert(address==0xdeadbeef);
     return r;
 }
+int aquaos_get_net_info(aquaos_net_info *info) {
+    if (config_mode == 1) { errno = EFAULT; return -1; }
+    memset(info, 0, sizeof(*info));
+    info->flags = config_mode == 2 ? 0 : AQUAOS_NET_PRESENT;
+    info->dns = config_mode == 3 ? 0 : configured_dns; return 0;
+}
 int aquaos_udp_socket(void) { return 7; }
 int aquaos_udp_bind(int fd, uint16_t port) { assert(fd==7 && !port);return 0; }
 int aquaos_udp_sendto(int fd,const void *data,size_t n,uint32_t ip,uint16_t port) {
-    assert(fd==7 && ip==AQUAOS_DNS_SERVER && port==53);++calls;
+    assert(fd==7 && ip==configured_dns && port==53);++calls;
     if(mode==3) { errno=ENODEV;return -1; }
     if(calls<4) { errno=EAGAIN;return -1; }
     memcpy(query,data,n);query_length=n;return (int)n;
@@ -38,7 +45,7 @@ int aquaos_udp_recvfrom(int fd,void *data,size_t capacity,aquaos_udp_address *so
     answer("aqua.test");memcpy(response,query,2);
     if(mode==2) { response[3]=0x83;put(response+6,0);response_length=query_length; }
     assert(capacity>=response_length);memcpy(data,response,response_length);
-    source->ip=receives==1?0x08080808:AQUAOS_DNS_SERVER;
+    source->ip=receives==1?0x08080808:configured_dns;
     source->port=receives==2?54:53;
     if(receives==3) ((unsigned char *)data)[0]^=1;
     if(receives==4) ((unsigned char *)data)[12]=0xff;
@@ -103,5 +110,15 @@ int main(void) {
         if(mode==2) assert(result<0 && errno==ENOENT);
         if(mode==3) assert(result<0 && errno==ENODEV && calls==1);
     }
-    puts("PASS: DNS wire validation, compression, CNAME, mutation corpus, retries and cleanup");
+    mode = 0; configured_dns = 0x0a141e09;
+    calls=ticks=closes=receives=0;
+    assert(!aquaos_dns_lookup("aqua.test",0,&address) && address==0xc000022a);
+    assert(closes==1 && calls>=4);
+    for(config_mode=1;config_mode<=3;++config_mode) {
+        calls=ticks=closes=receives=0;
+        assert(aquaos_dns_lookup("aqua.test",0,&address)<0);
+        assert(errno==(config_mode==1?EFAULT:config_mode==2?ENODEV:ENOENT));
+        assert(!calls && !closes);
+    }
+    puts("PASS: configured DNS, no-interface errors, DNS wire validation, compression, CNAME, mutation corpus, retries and cleanup");
 }

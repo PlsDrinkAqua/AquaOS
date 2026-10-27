@@ -54,8 +54,8 @@ static int tcp_emit(struct tcp_connection *c, unsigned flags, uint32_t seq,
     tcp_put16(segment+14,c->peer_fin?0:TCP_RX-c->count);
     if(flags&SYN) { segment[20]=2;segment[21]=4;tcp_put16(segment+22,1460); }
     if(length) kmemcpy(segment+header,data,length);
-    /* Static local IPv4 6.6.6.15; net.c owns the same interface configuration. */
-    uint32_t sum=0x0606+0x060f+(c->ip>>16)+(c->ip&65535)+6+header+length;
+    uint32_t local = net_local_ip();
+    uint32_t sum=(local>>16)+(local&65535)+(c->ip>>16)+(c->ip&65535)+6+header+length;
     tcp_put16(segment+16,tcp_check(tcp_sum(segment,header+length,sum)));
     return net_ipv4_send(c->ip,6,segment,header+length);
 }
@@ -302,4 +302,10 @@ void net_tcp_input(const uint8_t *ip,unsigned header,unsigned total) {
         tcp_finish(c);
         return;
     }
+}
+
+void net_tcp_config_changed(void) {
+    for (unsigned i = 0; i < TCP_SLOTS; ++i)
+        if (connections[i].state != FREE && connections[i].state != IDLE)
+            tcp_fail(&connections[i], K_ECONNRESET);
 }

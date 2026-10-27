@@ -24,3 +24,7 @@ search. Ctrl+S saves, Ctrl+F searches, and Ctrl+Q quits. See the
 `cp <source> <destination>` copies files and `mv <source> <destination>` moves
 or renames them. Both accept destination directories and multiple source files.
 See [file commands](docs/FILE_COMMANDS.md) for behavior and limits.
+
+Networking obtains IPv4, subnet, gateway, and DNS through DHCP, with a static
+QEMU development fallback. Run `netinfo` to inspect configuration and lease
+state. See [networking](docs/NETWORKING.md#dhcp-configuration-and-netinfo).

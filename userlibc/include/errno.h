@@ -19,6 +19,7 @@ extern int errno;
 #define EBUSY   16
 #define EXDEV 18
 #define EEXIST  17
+#define ENODEV  19
 #define ENOTDIR 20
 #define EISDIR  21
 #define EINVAL  22

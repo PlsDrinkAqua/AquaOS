@@ -14,3 +14,6 @@ int net_tcp_shutdown(int handle);
 void net_tcp_release(int handle);
 /* Shared IPv4 egress; resolves next hop, never retains the payload. */
 int net_ipv4_send(uint32_t destination, unsigned protocol, const void *payload, size_t length);
+
+/* Invalidate live connections without recycling handles owned by descriptors. */
+void net_tcp_config_changed(void);

@@ -9,6 +9,7 @@ static uint8_t sent[600];
 static size_t sent_length;
 static unsigned sends;
 static int route_error,send_error;
+uint32_t net_local_ip(void) { return 0x0606060fU; }
 int net_resolve(uint32_t ip,uint8_t out[6]) {
     (void)out;if(!ip) return -K_EINVAL;return route_error;
 }

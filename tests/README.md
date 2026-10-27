@@ -462,7 +462,7 @@ TCP and HTTP checks:
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Ikernel/include -idirafter libk/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
 /tmp/aquaos-tcp-host
 sh build.sh
 python3 tools/iso64.py
@@ -475,3 +475,20 @@ sanitizers. QEMU uses a real local HTTP server, verifies an exact binary respons
 on a disposable disk, and tests descriptor lifetime and no-NIC failure. The DNS
 fixture also checks hostname-to-HTTP integration with loss and reordered TCP
 data. See [TCP and HTTP](../docs/NETWORKING.md#tcp-active-open-clients-and-http).
+
+
+DHCP and network configuration checks (after building the kernel and ISO):
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include \
+  tests/dhcp_host.c -o /tmp/aquaos-dhcp-host
+/tmp/aquaos-dhcp-host
+python3 tests/netconfig_smoke.py
+```
+
+This tests real QEMU DHCP on default and changed subnets, HTTP, ping, link
+changes, and no-NIC reporting. `--live-dns` additionally checks `google.com`
+through the guest and captures the returned DNS answer; this optional mode
+needs working upstream DNS and may report synthetic answers supplied by a host
+proxy. See [DHCP and live DNS](../docs/NETWORKING.md#dhcp-configuration-and-netinfo).

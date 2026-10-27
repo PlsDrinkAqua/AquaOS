@@ -12,3 +12,6 @@ void e1000_poll(void);
  * -K_EINVAL means invalid buffer/length. Caller may reuse its buffer on return.
  * Serialized with interrupt masking on the single-CPU kernel. */
 int e1000_transmit(const void *frame, size_t length);
+
+/* Current hardware link status; safe before initialization. */
+int e1000_link_up(void);

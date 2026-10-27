@@ -2,9 +2,10 @@
 
 AquaOS provides PCI discovery and a polling E1000 driver with receive and
 transmit DMA rings. It sends one diagnostic Ethernet broadcast at boot.
-ARP resolves the static gateway and local-subnet peers, and answers requests for the guest IP.
+ARP resolves the configured gateway and local-subnet peers, and answers requests for the guest IP.
 A single IPv4/ICMP boot ping verifies the gateway path after ARP resolves.
-A userspace `ping` command can repeat gateway probes; DHCP is not implemented.
+A userspace `ping` command probes numeric addresses or hostnames. DHCP configures
+the interface automatically; `netinfo` displays configuration and link status.
 
 ## Console diagnostics
 
@@ -28,8 +29,10 @@ Run `sh qemu.sh`. The launcher creates one E1000 (Intel 82540EM, PCI
 8086:100e) with MAC `52:54:00:12:34:56`, attached to QEMU user networking.
 It explicitly sets the subnet to `6.6.6.0/24`, host/gateway to `6.6.6.6`,
 and first DHCP lease to `6.6.6.15`. The subnet's QEMU DNS proxy is `6.6.6.3`.
-The guest now uses static IP `6.6.6.15/24` and resolves gateway `6.6.6.6`.
-The userspace DNS resolver uses that proxy by default.
+The guest initially uses `6.6.6.15/24`, gateway `6.6.6.6`, and DNS `6.6.6.3`
+as a development fallback while DHCP runs. A valid DHCP ACK replaces the IP,
+mask, gateway, and DNS together. The userspace DNS resolver uses the current
+interface DNS server.
 
 Each launch retains `network.pcap` beside `dev.img` under its new
 `disk/aquaos64.*` directory and prints both paths. Open the capture in Wireshark
@@ -119,7 +122,7 @@ builds stopped. Guest development disks are untouched.
 
 `kernel/kernel/NET/net.c` handles Ethernet/IPv4 ARP using the wire format in
 [RFC 826](https://www.rfc-editor.org/rfc/rfc826). After both DMA rings initialize,
-it broadcasts an ARP request for `6.6.6.6`, using static sender IP `6.6.6.15`
+it broadcasts an ARP request for `6.6.6.6`, using initial fallback sender IP `6.6.6.15`
 and the station MAC read back from the NIC. Timer polling retries at one-second
 intervals (the current PIT runs at 100 Hz), with at most three attempts.
 Resolution stops retries and prints `ARP: gateway 6.6.6.6 MAC=...`.
@@ -135,7 +138,7 @@ by the network handler. All network state access currently requires interrupts
 disabled on the single CPU; received buffer pointers are never retained.
 
 The gateway entry remains pinned for the boot probes. An additional eight-entry
-ARP table resolves unicast peers on the static `6.6.6.0/24` subnet, including
+ARP table resolves unicast peers on the configured subnet (initially `6.6.6.0/24`), including
 QEMU's DNS proxy at `6.6.6.3`. `net_resolve(ip, mac)` returns the peer MAC for
 local destinations and the gateway MAC for off-subnet destinations. A cache miss
 sends an ARP request and returns `-K_EAGAIN`; the caller must retry its datagram,
@@ -152,10 +155,10 @@ expire. IPv4 reception accepts the cached peer MAC or the resolved gateway MAC.
 A router can deliver packets from local-subnet sources; QEMU's DNS proxy in
 particular advertises its own ARP MAC but sends IP replies via the gateway MAC. Network, subnet broadcast, self, loopback, multicast and
 reserved high-range destinations are rejected. The gateway uses its existing
-boot retry policy and does not expire.
+boot retry policy and does not expire; changing configuration clears ARP state.
 
-This is a static, single-interface milestone: address conflict detection,
-VLAN support, DHCP and configurable routing remain unimplemented.
+This is a single-interface implementation: address conflict detection,
+VLAN support and manually configurable routing remain unimplemented.
 A full TX queue can drop an ARP reply; bounded gateway retries cover lost
 requests without blocking the timer. ARP does not authenticate peer identities.
 
@@ -166,7 +169,7 @@ request replies, bounded retries and timer wraparound:
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Ikernel/include -idirafter libk/include \
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include \
   tests/arp_host.c kernel/kernel/NET/net.c kernel/kernel/NET/tcp.c -o /tmp/aquaos-arp-host
 /tmp/aquaos-arp-host
 ```
@@ -202,7 +205,7 @@ wrong reply identity, timer wraparound, late replies and TX failure:
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Ikernel/include -idirafter libk/include tests/icmp_host.c -o /tmp/aquaos-icmp-host
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include tests/icmp_host.c -o /tmp/aquaos-icmp-host
 /tmp/aquaos-icmp-host
 ```
 
@@ -272,14 +275,14 @@ Sends resolve local-subnet peers directly and use the gateway for off-subnet
 unicast destinations. An unresolved next hop returns `EAGAIN` without queuing
 payload data; peer resolution can also return `ETIMEDOUT` or `ENOSPC` as described
 above. Loopback, multicast, broadcast and self destinations are rejected.
-Configurable routing, DHCP, ICMP errors for closed UDP ports and retransmission
+Manually configurable routing, ICMP errors for closed UDP ports and retransmission
 remain unimplemented.
 
 Host verification:
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Ikernel/include -idirafter libk/include tests/udp_host.c -o /tmp/aquaos-udp-host
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include tests/udp_host.c -o /tmp/aquaos-udp-host
 /tmp/aquaos-udp-host
 ```
 
@@ -525,7 +528,7 @@ Verification (stop other builds while QEMU tests run):
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined \
-  -Ikernel/include -idirafter libk/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include tests/tcp_host.c -o /tmp/aquaos-tcp-host
 /tmp/aquaos-tcp-host
 sh build.sh
 python3 tools/iso64.py
@@ -551,3 +554,87 @@ unicast targets, stale replies and ownership) and `tests/dns_smoke.py` (hostname
 lookup, direct local replies, off-subnet replies, a no-reply destination and
 Ctrl+C followed by another ping). Those QEMU checks use a deterministic Ethernet
 fixture and do not depend on a public host answering ICMP.
+
+
+## DHCP configuration and netinfo
+
+`netinfo` displays E1000 presence, current hardware link state, MAC, IPv4,
+netmask, gateway, DNS, DHCP state, server, and remaining lease seconds. With no
+NIC it prints `Network: no interface`. Fresh disks install `/bin/netinfo`.
+
+The DHCP client starts in the kernel one second after NIC initialization,
+without blocking boot or printing asynchronous messages over the shell prompt.
+It sends DISCOVER and REQUEST from UDP port 68 to server port 67. Bootstrap
+traffic uses IPv4/Ethernet broadcast without requiring an address or ARP entry;
+port 68 is reserved from ordinary UDP bindings. Replies must pass IPv4/UDP
+length and checksum checks and match the transaction ID, BOOTP type, hardware
+type/length, client MAC, and DHCP cookie. Options are bounds checked; duplicate
+critical options, invalid masks/routes, wrong-server ACKs, and malformed timers
+are rejected. A valid OFFER selects an address/server; only its matching ACK
+activates the offered configuration.
+
+IP, mask, router, and DNS come from the lease. `nslookup`, hostname `ping`, and
+`httpget` use that DNS server; bare `ping` targets the current gateway. Routing,
+ARP, IPv4 source addresses, and TCP pseudo-header checksums use the current
+configuration. Address/mask/gateway changes discard old ARP entries and queued
+UDP data and fail active TCP connections without recycling descriptor handles.
+
+Finite leases renew at T1 (default half the lease) using unicast DHCPREQUEST,
+rebind at T2 (default seven eighths) using broadcast, and expire at the lease
+end. Server-provided T1/T2 must satisfy `0 < T1 < T2 < lease`. Infinite leases
+are supported. Timer accounting handles the 100 Hz tick counter wrapping.
+Discovery/request each make at most three attempts, four seconds apart,
+including TX failures. Timeout, a matching NAK, or lease expiry restores the
+QEMU development fallback; discovery restarts after 60 seconds. The fallback
+stays usable during initial discovery. This policy is intended for the default
+QEMU development network; a different subnet needs a working DHCP server.
+
+This bounded first client requires an IPv4 address, contiguous /1 through /30
+mask, on-link unicast router, DNS server, and lease of at least four seconds.
+It supports one interface, gateway, and DNS server. It has no DHCP option
+overload/concatenation, lease persistence, address-conflict detection/DECLINE,
+manual configuration command, or randomized retry scheduling. DHCP is not
+authenticated. See [RFC 2131](https://www.rfc-editor.org/rfc/rfc2131.html).
+
+Verification (stop other builds while running these checks):
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined \
+  -Ikernel/include -idirafter libk/include -idirafter userlibc/include \
+  tests/dhcp_host.c -o /tmp/aquaos-dhcp-host
+/tmp/aquaos-dhcp-host
+sh build.sh
+python3 tools/iso64.py
+python3 tests/netconfig_smoke.py
+python3 tests/dns_smoke.py
+python3 tests/http_smoke.py
+```
+
+The host test covers malformed/truncated replies, acquisition, changed routing,
+renewal, rebinding, expiry, NAK, backpressure, fallback, infinite leases, and
+wraparound. The QEMU test obtains real leases on the default network and on
+`10.20.30.0/24` with gateway `10.20.30.1`, lease start `10.20.30.50`, and DNS
+`10.20.30.9`. It verifies HTTP transfers (including TCP checksums), gateway ping,
+hardware link down/up, no-NIC behavior, and captured DISCOVER/REQUEST packets.
+It uses a local HTTP server and disposable disks, without Internet access.
+The DNS fixture has no DHCP server and exercises continued fallback operation.
+
+### Checking live DNS
+
+```sh
+python3 tests/netconfig_smoke.py --live-dns
+```
+
+This optional Internet-dependent check runs `nslookup google.com` inside the
+actual guest on both subnets, verifies that each displayed address appears in
+a DNS reply from the configured proxy, classifies it as public or non-public,
+and retains VGA output and PCAPs in `build/x86_64/network-live/`. It proves the
+resolver used a network reply, not that the upstream DNS answer is trustworthy.
+QEMU's DNS proxy forwards to host DNS; a VPN, proxy, or upstream DNS interceptor
+can supply synthetic addresses. In the development environment checked on
+2026-10-27, both guest and host DNS returned `198.18.0.66` for `google.com`,
+whereas Google's HTTPS resolver returned public Google addresses. The
+[`198.18.0.0/15` range](https://www.iana.org/assignments/iana-ipv4-special-registry) is reserved for benchmarking, so that result is not a
+public Google address. Changing only the guest IP or using a public UDP DNS
+server does not bypass an upstream DNS interceptor. No DNS answers are
+hardcoded in the resolver; `192.0.2.x` answers in deterministic tests are fixtures.

@@ -146,6 +146,8 @@ class DnsPeer:
         elif frame[12:14] == b'\x08\x00' and frame[23] == 6:
             self.tcp(frame)
         elif frame[12:14] == b'\x08\x00' and frame[23] == 17:
+            if frame[34:38] == struct.pack('!HH', 68, 67):
+                return  # This fixture supplies DNS, not DHCP.
             assert self.arp_dns and frame[:6] == SOURCE
             ip = frame[14:]
             total = int.from_bytes(ip[2:4], 'big')
@@ -207,7 +209,7 @@ def main(no_nic=False):
             stream.truncate(32 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(disk)], check=True)
         batch = tmp / 'install.txt'
-        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/nslookup /bin/nslookup\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\nwrite {ROOT}/build/x86_64/user/ping /bin/ping\n')
+        batch.write_text(f'mkdir /bin\nwrite {ROOT}/build/x86_64/user/shell /bin/shell\nwrite {ROOT}/build/x86_64/user/nslookup /bin/nslookup\nwrite {ROOT}/build/x86_64/user/httpget /bin/httpget\nwrite {ROOT}/build/x86_64/user/ping /bin/ping\nwrite {ROOT}/build/x86_64/user/netinfo /bin/netinfo\n')
         subprocess.run(['debugfs', '-w', '-f', str(batch), str(disk)], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         host, guest = socket.socketpair()
@@ -305,6 +307,7 @@ def main(no_nic=False):
                         command('nslookup truncated.test', 'truncated or overly complex DNS response')
                         command('nslookup broken.test', 'DNS server failure')
                         command('nslookup silent.test', 'timed out')
+                        command('netinfo', 'DHCP: static fallback')
                         # More than eight sequential sockets verifies cleanup on failure.
                         for _ in range(9):
                             command('nslookup missing.test', 'name not found or no IPv4 answer')

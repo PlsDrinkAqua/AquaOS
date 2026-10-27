@@ -8,6 +8,8 @@ extern "C" {
 /* Unicast ICMP API using ARP/gateway routing. IPv4 encoded as 0xAABBCCDD.
  * Start may return EAGAIN while ARP resolves; retry with a bounded wait.
  * Result: round-trip milliseconds or -1 with errno (EAGAIN while pending). */
+/* Configuration snapshot, also available with no NIC (flags == 0). */
+int aquaos_get_net_info(aquaos_net_info *info);
 int aquaos_ping_start(uint32_t ip);
 int aquaos_ping_result(void);
 

@@ -337,3 +337,7 @@ void e1000_init(void) {
         net_init(station, timer_ticks());
     }
 }
+
+int e1000_link_up(void) {
+    return registers && tx_ready && rx_ready && (read_register(E1000_STATUS) & E1000_STATUS_LU);
+}

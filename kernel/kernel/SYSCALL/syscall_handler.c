@@ -55,6 +55,7 @@ enum {
     SYS_TCP_CONNECT = 36,
     SYS_TCP_STATUS = 37,
     SYS_TCP_SHUTDOWN = 38,
+    SYS_NET_INFO = 39,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -192,6 +193,13 @@ void syscall_handler(interrupt_frame_t *regs)
             regs->eax = (uintptr_t)task_terminal_control(regs->ebx);
             break;
 
+        case SYS_NET_INFO: {
+            aquaos_net_info info;
+            net_get_info(&info);
+            regs->eax = copy_to_user((void *)regs->ebx, &info, sizeof(info)) < 0
+                ? (uintptr_t)-K_EFAULT : 0;
+            break;
+        }
         case SYS_TCP_SOCKET:
             regs->eax = (uintptr_t)fd_tcp_socket();
             break;
