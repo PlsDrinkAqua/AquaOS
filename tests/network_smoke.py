@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check PCI discovery and the QEMU network harness using a disposable disk."""
+from console_address import console_address
 import argparse
 import json
 import os
@@ -97,7 +98,7 @@ def boot(tmp, disk, label, devices, expected):
                     screen = ''
                     while time.monotonic() < deadline:
                         dump = tmp / 'vga.bin'
-                        qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                        qmp('human-monitor-command', {'command-line': f'pmemsave {console_address()} 4000 "{dump}"'})
                         data = dump.read_bytes()[::2]
                         current_screen = '\n'.join(data[i:i+80].decode('ascii', errors='replace') for i in range(0, 2000, 80))
                         screen += '\n' + current_screen
@@ -120,7 +121,7 @@ def boot(tmp, disk, label, devices, expected):
                         for _ in range(scroll_pages):
                             qmp('human-monitor-command', {'command-line': 'sendkey shift-pgup'})
                             time.sleep(.2)
-                            qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                            qmp('human-monitor-command', {'command-line': f'pmemsave {console_address()} 4000 "{dump}"'})
                             data = dump.read_bytes()[::2]
                             screen += '\n' + '\n'.join(data[i:i+80].decode('ascii', errors='replace')
                                                         for i in range(0, 2000, 80))
@@ -160,7 +161,7 @@ def boot(tmp, disk, label, devices, expected):
                         qmp('human-monitor-command', {'command-line': 'sendkey ret'})
                         end = time.monotonic() + 12
                         while time.monotonic() < end:
-                            qmp('human-monitor-command', {'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                            qmp('human-monitor-command', {'command-line': f'pmemsave {console_address()} 4000 "{dump}"'})
                             data = dump.read_bytes()[::2]
                             output = '\n'.join(data[i:i+80].decode('ascii', errors='replace')
                                                for i in range(0, 2000, 80))

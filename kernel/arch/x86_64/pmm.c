@@ -35,6 +35,16 @@ void pmm_init(multiboot_info_t *physical_info,uint32_t magic) {
     uintptr_t kernel_end=(uintptr_t)&_kernel_end-KERNEL_LINK_BASE;
     /* Keep low firmware memory and all boot/kernel storage reserved. */
     for(unsigned i=0;i<(kernel_end+4095)/4096;i++) reserve(i);
+    /* A firmware framebuffer must never become allocatable RAM. */
+    if (info->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) {
+        uint64_t base=info->framebuffer_addr;
+        uint64_t bytes=(uint64_t)info->framebuffer_pitch * info->framebuffer_height;
+        if (base < LIMIT) {
+            uint64_t end=bytes > LIMIT-base ? LIMIT : base+bytes;
+            for (uint64_t frame=base/4096; frame<(end+4095)/4096; frame++)
+                reserve((unsigned)frame);
+        }
+    }
     hint=(kernel_end+4095)/4096;
     kprintf("PMM: usable map ceiling=%lu MiB, physical addresses=64-bit\n",
             (unsigned long)managed_frames / 256);

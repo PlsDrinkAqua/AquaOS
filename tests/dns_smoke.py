@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Deterministic userspace DNS over real E1000/ARP/UDP, without Internet DNS."""
+from console_address import console_address
 import json
 import socket
 import struct
@@ -257,7 +258,7 @@ def main(no_nic=False):
                     def screen():
                         dump = tmp / 'vga.bin'
                         qmp('human-monitor-command', {
-                            'command-line': f'pmemsave 0xb8000 4000 "{dump}"'})
+                            'command-line': f'pmemsave {console_address()} 4000 "{dump}"'})
                         data = dump.read_bytes()[::2]
                         return '\n'.join(data[i:i+80].decode('ascii', errors='replace')
                                          for i in range(0, 2000, 80))

@@ -8,6 +8,9 @@
 #include <kernel/io.h>
 
 #include "vga.h"
+#ifdef __is_kernel
+#include <kernel/framebuffer.h>
+#endif
 
 static const size_t VGA_WIDTH = 80;
 static const size_t VGA_HEIGHT = 25;
@@ -16,6 +19,7 @@ static uint16_t* const VGA_MEMORY = (uint16_t*) (KERNEL_DIRECT_BASE + 0xB8000);
 static size_t terminal_row;
 static size_t terminal_column;
 static uint8_t terminal_color;
+uint16_t terminal_screen[80 * 25];
 static uint16_t* terminal_buffer;
 #define TERMINAL_LINES 1025
 static uint16_t lines[TERMINAL_LINES][80];
@@ -31,13 +35,27 @@ static bool cursor_enabled, cursor_drawn;
 static bool terminal_batch;
 static void terminal_redraw(void);
 static size_t cursor_row, cursor_column;
+static void terminal_screen_cell(size_t index, uint16_t cell) {
+    terminal_buffer[index] = cell;
+#ifdef __is_kernel
+    terminal_screen[index] = cell;
+    framebuffer_cell(index % VGA_WIDTH, index / VGA_WIDTH, cell);
+#endif
+}
+void terminal_refresh(void) {
+#ifdef __is_kernel
+    terminal_buffer = terminal_screen;
+#endif
+    terminal_redraw();
+}
+
 void terminal_putentryat(unsigned char c, uint8_t color, size_t x, size_t y);
 
 static void terminal_update_cursor(void) {
     if (terminal_batch || escape_state) return;
     if (cursor_drawn) {
-        terminal_buffer[cursor_row * VGA_WIDTH + cursor_column] =
-            lines[(live_top + cursor_row) % TERMINAL_LINES][cursor_column];
+        terminal_screen_cell(cursor_row * VGA_WIDTH + cursor_column,
+            lines[(live_top + cursor_row) % TERMINAL_LINES][cursor_column]);
         cursor_drawn = false;
     }
     if (!cursor_enabled || view_offset) return;
@@ -48,8 +66,8 @@ static void terminal_update_cursor(void) {
     uint8_t reversed = ((color >> 4) & 7) | ((color & 7) << 4);
     /* Equal base colours need contrast, including bright black on black. */
     if ((reversed & 7) == ((reversed >> 4) & 7)) reversed ^= 0x70;
-    terminal_buffer[cursor_row * VGA_WIDTH + cursor_column] =
-        vga_entry((unsigned char)cell, reversed);
+    terminal_screen_cell(cursor_row * VGA_WIDTH + cursor_column,
+        vga_entry((unsigned char)cell, reversed));
     cursor_drawn = true;
 }
 
@@ -157,8 +175,8 @@ static void terminal_redraw(void) {
     cursor_drawn = false;
     for (size_t y = 0; y < VGA_HEIGHT; y++) {
         size_t line = (live_top + TERMINAL_LINES - view_offset + y) % TERMINAL_LINES;
-        kmemcpy(&terminal_buffer[y * VGA_WIDTH], lines[line],
-                VGA_WIDTH * sizeof(uint16_t));
+        for (size_t x = 0; x < VGA_WIDTH; x++)
+            terminal_screen_cell(y * VGA_WIDTH + x, lines[line][x]);
     }
     terminal_update_cursor();
 }
@@ -204,8 +222,8 @@ void terminal_clear(void) {
     for (size_t y = 0; y < VGA_HEIGHT; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
             const size_t index = y * VGA_WIDTH + x;
-            terminal_buffer[index] = vga_entry(' ', terminal_color);
-            lines[y][x] = terminal_buffer[index];
+            terminal_screen_cell(index, vga_entry(' ', terminal_color));
+            lines[y][x] = vga_entry(' ', terminal_color);
         }
     }
     terminal_row = 0;
@@ -223,7 +241,7 @@ void terminal_setcolor(uint8_t color) {
 void terminal_putentryat(unsigned char c, uint8_t color, size_t x, size_t y) {
     const size_t index = y * VGA_WIDTH + x;
     lines[(live_top + y) % TERMINAL_LINES][x] = vga_entry(c, color);
-    if (!view_offset && !terminal_batch) terminal_buffer[index] = vga_entry(c, color);
+    if (!view_offset && !terminal_batch) terminal_screen_cell(index, vga_entry(c, color));
 }
 
 // Scrolls the terminal up by one line, and clears the last line.

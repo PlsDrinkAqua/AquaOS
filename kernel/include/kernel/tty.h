@@ -5,6 +5,7 @@
 
 void terminal_initialize(void);
 void terminal_clear(void);
+void terminal_refresh(void);
 /* Positive rows browse older output; negative rows browse newer output. */
 void terminal_scroll_view(int rows);
 void terminal_follow_output(void);

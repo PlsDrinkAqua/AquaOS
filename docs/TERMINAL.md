@@ -68,3 +68,30 @@ cc -I kernel/include -idirafter libk/include tests/tty_scrollback.c -o /tmp/aqua
 cc -Wall -Wextra -Werror -I kernel/include -idirafter libk/include -idirafter userlibc/include tests/shell_highlight.c -o /tmp/aquaos-shell-highlight
 /tmp/aquaos-shell-highlight
 ```
+
+## Framebuffer console
+
+The normal ISO requests a 640x480, 32-bit RGB framebuffer through Multiboot v1
+and preserves GRUB's graphics mode. The kernel validates the reported format,
+pitch and size, then maps the framebuffer supervisor-only and uncached in a
+separate device window. RGB channel ordering follows the boot information.
+The 80x25 terminal is rendered with an embedded public-domain 8x16 bitmap font,
+centered on the screen. Existing colours, editing, cursor and 1000-line
+scrollback retain their character-based representation. Non-ASCII bytes render
+as question marks. There is no GPU acceleration, mouse, image viewer or window
+server in this first backend.
+
+A character mirror (`terminal_screen`) in kernel RAM lets QEMU regression tools
+inspect terminal contents without reading VGA text memory in graphics mode.
+`tests/console_address.py` resolves its physical address from the built ELF.
+The legacy VGA backend is retained when no supported framebuffer is supplied;
+this cannot display text on firmware that has already selected an unsupported
+graphics mode.
+
+Host renderer validation:
+
+```sh
+cc -Wall -Wextra -Werror -fsanitize=address,undefined -I kernel/include \
+  tests/framebuffer_host.c -o /tmp/aquaos-fbcheck
+/tmp/aquaos-fbcheck
+```

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Boot aquaos.iso against a disposable ext2 disk; requires QEMU and e2fsprogs."""
+from console_address import console_address
 import argparse
 import hashlib
 import json
@@ -114,9 +115,9 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
 
             qmp("qmp_capabilities")
 
-            def screen():
+            def screen(address=None):
                 dump = tmp / "vga.bin"
-                qmp("human-monitor-command", {"command-line": f'pmemsave 0xb8000 4000 "{dump}"'})
+                qmp("human-monitor-command", {"command-line": f'pmemsave {address or console_address()} 4000 "{dump}"'})
                 data = dump.read_bytes()[::2]
                 return "\n".join(data[i:i+80].decode("ascii", errors="replace").rstrip()
                                  for i in range(0, 2000, 80))
@@ -124,7 +125,7 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
             def wait_for(expected, seconds=12):
                 deadline = time.monotonic() + seconds
                 while time.monotonic() < deadline:
-                    text = screen()
+                    text = screen("0xb8000" if expected == "GNU GRUB" else None)
                     if "FAIL" in text or "fatal kernel exception" in text:
                         raise AssertionError(text)
                     if expected in text:

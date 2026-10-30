@@ -5,6 +5,7 @@ Build kernel, userspace and ISO first. Uses disposable disks, no existing disks.
 The default tests need no Internet. --live-dns additionally resolves google.com
 and preserves the guest output and PCAP under build/x86_64/network-live/.
 """
+from console_address import console_address
 import argparse
 import http.server
 import ipaddress
@@ -81,7 +82,7 @@ class Guest:
 
     def screen(self):
         dump = self.tmp/'vga.bin'
-        self.monitor(f'pmemsave 0xb8000 4000 "{dump}"')
+        self.monitor(f'pmemsave {console_address()} 4000 "{dump}"')
         data = dump.read_bytes()[::2]
         return '\n'.join(data[i:i+80].decode('ascii', errors='replace') for i in range(0,2000,80))
 

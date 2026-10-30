@@ -2,7 +2,10 @@
 .set BASE, 0xffffffff80000000
 .section .multiboot,"a"
 .align 4
-.long 0x1badb002, 3, -(0x1badb002 + 3)
+.long 0x1badb002, 7, -(0x1badb002 + 7)
+/* Address fields unused without the a.out flag; request RGB 640x480x32. */
+.long 0, 0, 0, 0, 0
+.long 0, 640, 480, 32
 .section .boot.text,"ax"
 .code32
 .global _start

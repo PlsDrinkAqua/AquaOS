@@ -2,6 +2,8 @@
 #include <stdint.h>
 
 #include <kernel/tty.h>
+#include <kernel/framebuffer.h>
+#include <kernel/layout.h>
 #include <kernel/pic.h>
 #include <kernel/irq.h>
 #include <kernel/multiboot.h>
@@ -50,6 +52,11 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 
 	kprintf("Initilizing Virtual Memory Manager.................");
 	vmm_init();
+    if (magic == MULTIBOOT_BOOTLOADER_MAGIC &&
+        framebuffer_init((const void *)(KERNEL_DIRECT_BASE + (uintptr_t)mbd))) {
+        terminal_refresh();
+        kprintf("Display: RGB framebuffer, 80x25 console\n");
+    }
 	kprintf("done \n");
 
 	kprintf("Initilizing Kernel Heap Allocator.................");
