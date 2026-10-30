@@ -19,8 +19,9 @@ plus clipped `aquaos_fill_rect()` and `aquaos_blit()`. Pixels are XRGB8888 integ
 responsibility. Blits require non-overlapping source/destination storage.
 
 The kernel allocates a full-screen RAM backbuffer after heap initialization.
-Fonts render into this buffer; `present()` submits the completed cell rectangle
-to device memory, translating RGB fields and respecting device pitch. Full-screen
+Fonts render into this buffer. Terminal writes batch changed cells and submit
+the completed dirty bounding rectangle through `present()`, translating RGB
+fields and respecting device pitch. Individual unbatched glyph writes remain supported. Full-screen
 image submissions are copied to RAM and then presented. This is CPU software
 rendering with no vsync/page flipping; backbuffering does not guarantee no tearing.
 There is no persistent image layer, resizing, alpha blending or window compositor.

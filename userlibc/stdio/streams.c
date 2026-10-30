@@ -4,12 +4,21 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdlib.h>
+#include "internal.h"
 
-/* Initially unbuffered: all I/O reaches the descriptor before returning.
- * This also avoids duplicating pending output across fork or losing it at exec. */
-struct aquaos_file { int used, fd, readable, writable, eof, error, pushed; };
+/* Read-ahead only for seekable files. Terminal/pipe/socket input and all
+ * output remain unbuffered. Input positioning is synchronized explicitly. */
+#define READ_BUFFER_SIZE 4096U
+struct aquaos_file {
+    int used, fd, readable, writable, eof, error, pushed, seekable;
+    unsigned char *buffer;
+    size_t position, end;
+};
 static FILE files[FOPEN_MAX] = {
-    {1, 0, 1, 0, 0, 0, EOF}, {1, 1, 0, 1, 0, 0, EOF}, {1, 2, 0, 1, 0, 0, EOF}
+    {.used=1,.fd=0,.readable=1,.pushed=EOF},
+    {.used=1,.fd=1,.writable=1,.pushed=EOF},
+    {.used=1,.fd=2,.writable=1,.pushed=EOF}
 };
 FILE *stdin = &files[0];
 FILE *stdout = &files[1];
@@ -42,7 +51,10 @@ static int mode_flags(const char *mode, int *readable, int *writable) {
     return flags;
 }
 static FILE *attach(FILE *f, int fd, int r, int w) {
-    *f = (FILE){1, fd, r, w, 0, 0, EOF};
+    int saved_errno = errno;
+    int seekable = r && lseek(fd, 0, SEEK_CUR) >= 0;
+    errno = saved_errno;
+    *f = (FILE){.used=1,.fd=fd,.readable=r,.writable=w,.pushed=EOF,.seekable=seekable};
     return f;
 }
 FILE *fopen(const char *path, const char *mode) {
@@ -66,13 +78,45 @@ FILE *fdopen(int fd, const char *mode) {
     if ((requested & O_APPEND) && fcntl(fd, F_SETFL, flags | O_APPEND) < 0) return NULL;
     return attach(f, fd, r, w);
 }
+static size_t unread(FILE *f) {
+    return f->end - f->position + (f->pushed != EOF);
+}
+static int sync_input(FILE *f) {
+    if (!f->seekable) return 0;
+    size_t pending = unread(f);
+    if (pending && lseek(f->fd, -(off_t)pending, SEEK_CUR) < 0) return EOF;
+    f->position = f->end = 0;
+    f->pushed = EOF;
+    return 0;
+}
+/* Before fork/exec, align shared descriptors to logical stream positions.
+ * Each process must still fflush before switching shared active handles. */
+int __aquaos_stdio_sync_inputs(void) {
+    int result=0, saved_errno=0;
+    for (unsigned i=0;i<FOPEN_MAX;i++) {
+        if (files[i].used && sync_input(&files[i])<0 && !result) {
+            result=-1; saved_errno=errno;
+        }
+    }
+    if (result<0) errno=saved_errno;
+    return result;
+}
 int fclose(FILE *f) {
     if (!valid(f)) return EOF;
-    int result = close(f->fd);
-    f->used = 0;
+    int result=sync_input(f), saved_errno=errno;
+    if (close(f->fd)<0) result=EOF;
+    else if (result<0) errno=saved_errno;
+    free(f->buffer);
+    f->buffer=NULL;
+    f->used=0;
     return result < 0 ? EOF : 0;
 }
-int fflush(FILE *f) { return f && !valid(f) ? EOF : 0; }
+int fflush(FILE *f) {
+    /* Output is already synchronous. NULL flushes output streams only. */
+    if (!f) return 0;
+    if (!valid(f)) return EOF;
+    return sync_input(f);
+}
 int fileno(FILE *f) { return valid(f) ? f->fd : -1; }
 int feof(FILE *f) { return valid(f) ? f->eof : 0; }
 int ferror(FILE *f) { return valid(f) ? f->error : 1; }
@@ -87,12 +131,31 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *f) {
     unsigned char *out = ptr;
     if (f->pushed != EOF) { out[done++] = f->pushed; f->pushed = EOF; }
     while (done < wanted) {
-        size_t n = wanted - done;
-        if (n > INT_MAX) n = INT_MAX;
-        int result = read(f->fd, out + done, n);
-        if (result < 0) { f->error = 1; break; }
-        if (!result) { f->eof = 1; break; }
-        done += (unsigned)result;
+        if (f->position < f->end) {
+            size_t n=f->end-f->position;
+            if(n>wanted-done) n=wanted-done;
+            memcpy(out+done,f->buffer+f->position,n);
+            f->position+=n; done+=n;
+            continue;
+        }
+        size_t n=wanted-done;
+        if (n>INT_MAX) n=INT_MAX;
+        if (f->seekable && n<READ_BUFFER_SIZE && !f->buffer) {
+            int saved_errno=errno;
+            f->buffer=malloc(READ_BUFFER_SIZE);
+            errno=saved_errno; /* Allocation failure falls back to direct I/O. */
+        }
+        if (f->seekable && n<READ_BUFFER_SIZE && f->buffer) {
+            int result=read(f->fd,f->buffer,READ_BUFFER_SIZE);
+            if (result<0) { f->error=1; break; }
+            if (!result) { f->eof=1; break; }
+            f->position=0; f->end=(unsigned)result;
+        } else {
+            int result=read(f->fd,out+done,n);
+            if (result<0) { f->error=1; break; }
+            if (!result) { f->eof=1; break; }
+            done+=(unsigned)result;
+        }
     }
     return done / size;
 }
@@ -100,6 +163,7 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE *f) {
     if (!valid(f) || !size || !count) return 0;
     if (!f->writable) { fail(f, EBADF); return 0; }
     if (count > SIZE_MAX / size) { fail(f, EOVERFLOW); return 0; }
+    if (sync_input(f)<0) { f->error=1; return 0; }
     size_t wanted = size * count, done = 0;
     while (done < wanted) {
         size_t n = wanted - done;
@@ -114,11 +178,13 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE *f) {
 int fseek(FILE *f, long offset, int whence) {
     if (!valid(f)) return -1;
     int64_t adjusted = offset;
-    if (whence == SEEK_CUR && f->pushed != EOF) {
-        if (adjusted == INT64_MIN) { errno = EOVERFLOW; return -1; }
-        adjusted--;
+    if (whence == SEEK_CUR) {
+        size_t pending=unread(f);
+        if (adjusted < INT64_MIN+(int64_t)pending) { errno=EOVERFLOW; return -1; }
+        adjusted-=(int64_t)pending;
     }
     if (lseek(f->fd, (off_t)adjusted, whence) < 0) return -1;
+    f->position=f->end=0;
     f->pushed = EOF; f->eof = 0;
     return 0;
 }
@@ -126,7 +192,7 @@ long ftell(FILE *f) {
     if (!valid(f)) return -1;
     off_t pos = lseek(f->fd, 0, SEEK_CUR);
     if (pos < 0) return -1;
-    return (long)pos - (f->pushed != EOF);
+    return (long)pos - (long)unread(f);
 }
 void rewind(FILE *f) { if (valid(f)) { fseek(f, 0, SEEK_SET); clearerr(f); } }
 int fgetc(FILE *f) { unsigned char c; return fread(&c, 1, 1, f) == 1 ? c : EOF; }

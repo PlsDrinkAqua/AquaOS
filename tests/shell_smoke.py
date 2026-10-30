@@ -40,6 +40,9 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
         kilo_display = tmp / "kilo-display.c"
         kilo_display.write_text("int " + "x" * 100 + "\nsecond row\n")
         commands.append(f"write {kilo_display} /kilo-display.c")
+        kilo_large = tmp / "kilo-large.h"
+        kilo_large.write_text("".join(f"int variable_{i:04d} = {i};\n" for i in range(1660)))
+        commands.append(f"write {kilo_large} /kilo-large.h")
         linked = tmp / "linked"
         linked.write_text("linked")
         oversized = tmp / "oversized"
@@ -258,6 +261,14 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 visual_keys(["ctrl-q"])
                 wait_for("exited from /bin/kilo with status 0")
                 command("cat /kilo.c", "\nint value=1\necon\n")
+                # Source-sized input must load promptly and preserve every row.
+                command("kilo /kilo-large.h", "Ctrl-S = save")
+                text = wait_for("1660 lines")
+                assert text.splitlines()[0] == "int variable_0000 = 0;", text
+                visual_keys(["x", "ctrl-s"])
+                wait_for(f"{kilo_large.stat().st_size + 1} bytes written on disk")
+                visual_keys(["ctrl-q"])
+                wait_for("exited from /bin/kilo with status 0")
                 # An existing temporary file must never be overwritten.
                 command("echo recovery > /kilo.c.kilo-tmp")
                 command("kilo /kilo.c", "Ctrl-S = save")
@@ -323,6 +334,9 @@ def run(block_size, tinycc=False, scrollback_only=False, layout_only=False, self
                 persisted = subprocess.run(["debugfs", "-R", "cat /kilo.c", str(disk)],
                                            text=True, capture_output=True, check=True)
                 assert persisted.stdout == "int value=1\necon\n", persisted.stdout
+                large_saved = subprocess.run(["debugfs", "-R", "cat /kilo-large.h", str(disk)],
+                                             text=True, capture_output=True, check=True)
+                assert large_saved.stdout == "x" + kilo_large.read_text()
                 print("PASS: Kilo disk persistence and ext2 integrity", flush=True)
                 return
             if compiler_only:

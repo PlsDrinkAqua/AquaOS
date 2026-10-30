@@ -520,3 +520,14 @@ BMP viewer after building the kernel/userspace and ISO. It uses a disposable
 ext2 disk and validates actual QEMU screenshot pixels, display syscall bounds
 and ownership, terminal restoration, and scrollback. Host sanitizer checks are
 listed in [graphics](../docs/GRAPHICS.md).
+
+`python3 tests/kilo_profile.py --label current --repeats 3` profiles the actual
+Kilo load/first-frame paths on TinyCC's `tcc.h` using a disposable QEMU disk.
+See [Kilo performance](../ports/kilo/README.md#system-level-read-performance) for
+measurement scope and reproduction instructions.
+
+System-level buffering and kernel cache checks are documented in [caching](../docs/CACHING.md).
+
+`python3 tests/kilo_scroll.py` uses the staged real `tcc.h` to check sustained
+and burst scrolling, visible source lines, cursor placement and framebuffer
+pixels. Build the kernel/userspace/ISO and stage TinyCC before running it.

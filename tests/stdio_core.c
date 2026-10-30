@@ -97,7 +97,61 @@ static int context_checks(void) {
     controls(0x037f, 0x1f80);
     return 0;
 }
+static int buffering_checks(void) {
+    unsigned char data[9000], actual[9000];
+    for(unsigned i=0;i<sizeof(data);i++) data[i]=i%251;
+    FILE *f=fopen("/buffered.txt","w+"); CHECK(f);
+    CHECK(fwrite(data,1,sizeof(data),f)==sizeof(data));
+    rewind(f); CHECK(fgetc(f)==0 && ftell(f)==1);
+    CHECK(fseek(f,0,SEEK_CUR)==0 && fgetc(f)==1);
+    CHECK(fputc('Z',f)=='Z' && ftell(f)==3 && fgetc(f)==3);
+    CHECK(ungetc('Q',f)=='Q' && ftell(f)==3);
+    CHECK(fflush(f)==0);
+    unsigned char c;
+    CHECK(read(fileno(f),&c,1)==1 && c==3);
+    CHECK(fgetc(f)==4);
+    rewind(f); CHECK(fgetc(f)==0);
+    int child=fork(); CHECK(child>=0);
+    if(!child) { CHECK(fgetc(f)==1); exit(23); }
+    CHECK(wait(child)==23 && ftell(f)==2 && fgetc(f)=='Z');
+    CHECK(fflush(f)==0);
+    child=fork(); CHECK(child>=0);
+    if(!child) {
+        CHECK(fgetc(f)==3);
+        char descriptor[16]; snprintf(descriptor,sizeof(descriptor),"%d",fileno(f));
+        const char *args[]={"stdiocheck","exec-input",descriptor,NULL};
+        exec("/bin/stdiocheck",args);
+        exit(1);
+    }
+    CHECK(wait(child)==0 && fgetc(f)==5);
+    CHECK(exec("/missing-buffer-exec",NULL)==-1 && errno==ENOENT);
+    CHECK(fgetc(f)==6);
+    rewind(f); CHECK(fread(actual,1,sizeof(actual),f)==sizeof(actual));
+    data[2]='Z'; CHECK(!memcmp(actual,data,sizeof(data)));
+    CHECK(fclose(f)==0 && unlink("/buffered.txt")==0);
+    /* A cached disk page must remain coherent across distinct processes,
+     * overwrites, truncation, and filesystem block reuse. */
+    int fd=open("/cache.txt",O_CREAT|O_RDWR|O_TRUNC); CHECK(fd>=0);
+    CHECK(write(fd,data,4096)==4096 && lseek(fd,0,SEEK_SET)==0);
+    CHECK(read(fd,actual,4096)==4096 && !memcmp(actual,data,4096));
+    child=fork(); CHECK(child>=0);
+    if(!child) {
+        int other=open("/cache.txt",O_WRONLY|O_TRUNC); CHECK(other>=0);
+        CHECK(write(other,"new",3)==3 && close(other)==0); exit(0);
+    }
+    CHECK(wait(child)==0 && lseek(fd,0,SEEK_SET)==0);
+    CHECK(read(fd,actual,sizeof(actual))==3 && !memcmp(actual,"new",3));
+    CHECK(close(fd)==0 && unlink("/cache.txt")==0);
+    puts("buffered stdio and cache consistency checks passed");
+    return 0;
+}
 int main(int argc, char **argv) {
+    if (argc==3 && !strcmp(argv[1],"exec-input")) {
+        unsigned char c;
+        CHECK(read(atoi(argv[2]),&c,1)==1 && c==4);
+        return 0;
+    }
+
     if (argc == 2 && !strcmp(argv[1], "exec-fpu")) {
         CHECK(check_controls(0x037f, 0x1f80));
         CHECK(numeric_checks() == 0);
@@ -105,6 +159,7 @@ int main(int argc, char **argv) {
     }
     CHECK(numeric_checks() == 0);
     CHECK(context_checks() == 0);
+    CHECK(buffering_checks() == 0);
 
     char buf[128];
     CHECK(snprintf(buf, sizeof(buf), "%+08d %#x %.4s", -42, 42, "hello") == 18);

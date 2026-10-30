@@ -69,3 +69,37 @@ collision, disk persistence and offline ext2 consistency. It also checks that
 opened file text, including a long first row, stays visible at the top of the
 screen. Kilo checks also run
 in the regular shell smoke suite.
+
+## System-level read performance
+
+Kilo uses its original `fgetc()` line reader, exact-size row/output reallocations,
+full following-row syntax updates and original terminal output. The temporary
+editor-specific optimizations have been removed. File performance now comes from
+[libc read buffering and the kernel disk page cache](../../docs/CACHING.md).
+
+Diagnostic measurement (normal Kilo has no profiling hooks):
+
+```sh
+sh build.sh
+python3 tools/iso64.py
+python3 tests/kilo_profile.py --label libc-cache --repeats 3
+```
+
+The benchmark requires the TinyCC port's staged `tcc.h`. It uses a disposable
+4 KiB ext2 disk, QEMU TCG and 128 MiB RAM. It saves the diagnostic ELF and JSON
+under `build/x86_64/kilo-profile/`. The report includes read counts, elapsed TSC
+intervals for open/read/allocation/first-frame work, and kernel cache counters.
+Host seconds include process startup, first render, report output and QMP polling,
+but exclude command typing. TSC intervals are not hardware CPU cycle profiles.
+
+On 2026-10-30, QEMU 8.2.2, the same 56,074-byte/1660-row `tcc.h`, three-run medians:
+
+| Configuration | Read syscalls including EOF | Host elapsed |
+| --- | ---: | ---: |
+| Original editor + unbuffered libc, no kernel cache | 56,075 | 96.66 s |
+| Original editor + libc buffering and disk page cache | 15 | 0.25 s |
+
+The current editor source is unchanged from before the local optimizations.
+Timing depends on the host and VM setup; these figures describe this benchmark.
+The QEMU regression also edits/saves a 1660-row source file and checks persisted
+contents and ext2 integrity.

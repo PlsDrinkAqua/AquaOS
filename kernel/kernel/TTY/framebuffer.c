@@ -16,6 +16,8 @@ static uint32_t colors[16];
 static aquaos_surface back;
 static unsigned red_pos, green_pos, blue_pos;
 static uint32_t owner;
+static unsigned update_depth;
+static uint32_t dirty_x0, dirty_y0, dirty_x1, dirty_y1;
 
 /* Copy a clipped rectangle from RAM to the device, respecting device pitch. */
 static void present(int32_t x, int32_t y, uint32_t w, uint32_t h) {
@@ -30,6 +32,18 @@ static void present(int32_t x, int32_t y, uint32_t w, uint32_t h) {
         pixels[(size_t)row*stride+col]=((rgb>>16)<<red_pos) |
             (((rgb>>8)&255)<<green_pos) | ((rgb&255)<<blue_pos);
     }
+}
+
+void framebuffer_begin_update(void) {
+    if (!update_depth++) {
+        dirty_x0 = back.width; dirty_y0 = back.height;
+        dirty_x1 = dirty_y1 = 0;
+    }
+}
+void framebuffer_end_update(void) {
+    if (!update_depth || --update_depth) return;
+    if (dirty_x1 > dirty_x0 && dirty_y1 > dirty_y0)
+        present(dirty_x0, dirty_y0, dirty_x1-dirty_x0, dirty_y1-dirty_y0);
 }
 
 bool framebuffer_info(uint32_t *w,uint32_t *h) {
@@ -103,5 +117,11 @@ void framebuffer_cell(unsigned x,unsigned y,uint16_t cell) {
         uint32_t *dst=back.pixels+(top+y*16+row)*back.stride+left+x*8;
         for (unsigned col=0;col<8;col++) dst[col]=(bits & (0x80U>>col)) ? fg : bg;
     }
-    present(left+x*8,top+y*16,8,16);
+    uint32_t px=left+x*8, py=top+y*16;
+    if (update_depth) {
+        if (px<dirty_x0) dirty_x0=px;
+        if (py<dirty_y0) dirty_y0=py;
+        if (px+8>dirty_x1) dirty_x1=px+8;
+        if (py+16>dirty_y1) dirty_y1=py+16;
+    } else present(px,py,8,16);
 }

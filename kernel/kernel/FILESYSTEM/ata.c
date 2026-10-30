@@ -4,6 +4,8 @@
 #include "kernel/pic.h"
 #include "kernel/kmalloc.h"
 #include "kernel/ata.h"
+#include <kernel/page_cache.h>
+#include <kernel/task.h>
 
 // Primary ATA I/O ports
 #define ATA_PRIMARY_DATA       0x1F0
@@ -47,6 +49,7 @@ static inline void ata_wait_ready(void) {
 
 // Soft reset, keeping IRQ disabled (nIEN=1)
 void ata_soft_reset(void) {
+    page_cache_reset();
     outb(ATA_PRIMARY_CONTROL, 0x04 | 0x02);
     io_wait();
     outb(ATA_PRIMARY_CONTROL, 0x02);
@@ -59,7 +62,7 @@ void ata_init(void) {
 }
 
 // Read multiple sectors; returns number of sectors read
-uint32_t ata_read_sectors(uint32_t lba, uint8_t count, uint8_t *buffer) {
+uint32_t ata_raw_read_sectors(uint32_t lba, uint8_t count, uint8_t *buffer) {
     uint32_t sectors = count ? count : 256;
     // Ensure device ready
     ata_wait_ready();
@@ -73,7 +76,7 @@ uint32_t ata_read_sectors(uint32_t lba, uint8_t count, uint8_t *buffer) {
     // Issue read command
     outb(ATA_PRIMARY_COMMAND, ATA_CMD_READ);
     // For each sector, poll and transfer
-    for (uint8_t s = 0; s < sectors; s++) {
+    for (uint32_t s = 0; s < sectors; s++) {
         ata_wait_busy();
         ata_wait_drq();
         // Transfer 256 words => 512 bytes
@@ -88,8 +91,8 @@ uint32_t ata_read_sectors(uint32_t lba, uint8_t count, uint8_t *buffer) {
 }
 
 // Write multiple sectors; returns number of sectors written
-uint32_t ata_write_sectors(uint32_t lba, uint8_t count, const uint8_t *buffer) {
-    uint8_t sectors = count ? count : 256;
+uint32_t ata_raw_write_sectors(uint32_t lba, uint8_t count, const uint8_t *buffer) {
+    uint32_t sectors = count ? count : 256;
     ata_wait_ready();
     outb(ATA_PRIMARY_DRIVE, 0xE0 | ((lba >> 24) & 0x0F)); io_wait();
     outb(ATA_PRIMARY_SECCOUNT, count);
@@ -97,7 +100,7 @@ uint32_t ata_write_sectors(uint32_t lba, uint8_t count, const uint8_t *buffer) {
     outb(ATA_PRIMARY_LBA1, (uint8_t)(lba >> 8));
     outb(ATA_PRIMARY_LBA2, (uint8_t)(lba >> 16));
     outb(ATA_PRIMARY_COMMAND, ATA_CMD_WRITE);
-    for (uint8_t s = 0; s < sectors; s++) {
+    for (uint32_t s = 0; s < sectors; s++) {
         ata_wait_busy();
         ata_wait_drq();
         for (int i = 0; i < 256; i++) {
@@ -107,6 +110,20 @@ uint32_t ata_write_sectors(uint32_t lba, uint8_t count, const uint8_t *buffer) {
         }
     }
     return sectors;
+}
+
+/* Keep PIO and cache mutation serialized; safe before tasking_init as well. */
+uint32_t ata_read_sectors(uint32_t lba,uint8_t count,uint8_t *buffer) {
+    task_preemption_disable();
+    uint32_t result=page_cache_read(lba,count,buffer);
+    task_preemption_enable();
+    return result;
+}
+uint32_t ata_write_sectors(uint32_t lba,uint8_t count,const uint8_t *buffer) {
+    task_preemption_disable();
+    uint32_t result=page_cache_write(lba,count,buffer);
+    task_preemption_enable();
+    return result;
 }
 
 // Self-test using kmalloc for buffer allocation

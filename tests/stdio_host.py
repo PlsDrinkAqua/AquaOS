@@ -16,10 +16,15 @@ with tempfile.TemporaryDirectory(prefix="aquaos-stdio-") as name:
 #include <stdarg.h>
 #include <stdint.h>
 #include <limits.h>
+#include <stdlib.h>
+int zt_alloc_error;
+void *zt_malloc(size_t n) { return zt_alloc_error ? NULL : malloc(n); }
 int zt_errno;
 int zt_chunk = 3;
 int zt_budget = -1;
 int zt_read_error;
+int zt_read_calls;
+int zt_seek_error;
 int zt_close_error;
 static int result(int n) { if (n < 0) zt_errno = errno; return n; }
 int zt_open(const char *p, int flags, ...) { return result(open(p, flags, 0644)); }
@@ -29,6 +34,7 @@ int zt_close(int fd) {
     return n;
 }
 int zt_read(int fd, void *p, size_t n) {
+    zt_read_calls++;
     if (zt_read_error) { zt_errno = EIO; return -1; }
     if (zt_chunk && n > (size_t)zt_chunk) n = zt_chunk;
     return result(read(fd, p, n));
@@ -42,6 +48,7 @@ int zt_write(int fd, const void *p, size_t n) {
     return written;
 }
 int64_t zt_lseek(int fd, int64_t offset, int whence) {
+    if(zt_seek_error) { zt_errno=EIO; return -1; }
     off_t n=lseek(fd,offset,whence); if(n<0) zt_errno=errno; return n;
 }
 int zt_fcntl(int fd, int command, ...) {
@@ -53,7 +60,7 @@ int zt_unlink(const char *p) { return result(unlink(p)); }
 int zt_rmdir(const char *p) { return result(rmdir(p)); }
 ''')
     symbols = "stdin stdout stderr fopen fdopen fclose fflush fread fwrite fseek ftell rewind feof ferror clearerr fileno fgetc getc ungetc fgets fputc putc fputs remove printf vprintf fprintf vfprintf sprintf vsprintf snprintf vsnprintf sscanf vsscanf strtof strtod strtold frexpl scalbnl scalbn ldexp fabsl copysignl fmodl".split()
-    flags = [f"-D{s}=zt_{s}" for s in symbols + "errno open close read write lseek fcntl unlink rmdir".split()]
+    flags = [f"-D{s}=zt_{s}" for s in symbols + "errno malloc open close read write lseek fcntl unlink rmdir".split()]
     objects = []
     for source in [ROOT / "userlibc/stdio/streams.c", ROOT / "userlibc/stdio/printf.c", ROOT / "userlibc/stdio/sscanf.c",
                    ROOT / "userlibc/stdio/floatscan.c", ROOT / "userlibc/stdlib/strtof.c",
@@ -210,4 +217,52 @@ int zt_rmdir(const char *p) { return result(rmdir(p)); }
     C.c_int.in_dll(lib, "zt_close_error").value = 1
     assert fclose(f) == -1
     C.c_int.in_dll(lib, "zt_close_error").value = 0
-    print("stdio host checks passed")
+    # Exercise real libc buffering (not the host's FILE implementation).
+    chunk = C.c_int.in_dll(lib, "zt_chunk"); chunk.value = 0
+    read_calls = C.c_int.in_dll(lib, "zt_read_calls")
+    payload = bytes(i % 251 for i in range(9000))
+    Path(path.decode()).write_bytes(payload)
+    f = fopen(path, b"r+"); assert f
+    read_calls.value = 0
+    assert fgetc(f) == payload[0] and read_calls.value == 1
+    assert ftell(f) == 1 and os.lseek(fileno(f), 0, 1) == 4096
+    for i in range(1, 4097): assert fgetc(f) == payload[i]
+    assert read_calls.value == 2 and ftell(f) == 4097
+    assert fseek(f, -4096, 1) == 0 and ftell(f) == 1
+    assert fgetc(f) == payload[1]
+    assert fwrite(b"Z", 1, 1, f) == 1  # Rewind unread input before writing.
+    assert ftell(f) == 3 and fgetc(f) == payload[3]
+    seek_error = C.c_int.in_dll(lib, "zt_seek_error"); seek_error.value = 1
+    assert fseek(f, 0, 0) == -1
+    seek_error.value = 0
+    assert fseek(f, -(2**63), 1) == -1
+    assert C.c_int.in_dll(lib, "zt_errno").value == 75
+    assert ftell(f) == 4 and fgetc(f) == payload[4]  # Failed seek kept buffered bytes.
+    flush = fn("fflush", integer, [ptr])
+    assert flush(f) == 0 and os.lseek(fileno(f), 0, 1) == 5
+    assert os.read(fileno(f), 1) == payload[5:6]
+    assert fgetc(f) == payload[6]
+    sync = lib.__aquaos_stdio_sync_inputs; sync.restype = integer
+    assert sync() == 0 and os.lseek(fileno(f), 0, 1) == 7
+    assert ungetc(ord('Q'), f) == ord('Q') and ftell(f) == 6
+    assert flush(f) == 0 and os.lseek(fileno(f), 0, 1) == 6
+    assert fgetc(f) == payload[6]
+    duplicate = os.dup(fileno(f))
+    assert fclose(f) == 0 and os.lseek(duplicate, 0, 1) == 7
+    os.close(duplicate)
+    assert Path(path.decode()).read_bytes() == payload[:2] + b"Z" + payload[3:]
+    allocation_error = C.c_int.in_dll(lib, "zt_alloc_error")
+    allocation_error.value = 1
+    f = fopen(path, b"r"); assert f
+    read_calls.value = 0
+    assert fgetc(f) == payload[0] and os.lseek(fileno(f), 0, 1) == 1
+    assert fgetc(f) == payload[1] and read_calls.value == 2 and not ferror(f)
+    allocation_error.value = 0
+    assert fclose(f) == 0
+    # Nonseekable FILE input must not prefetch and block waiting for 4 KiB.
+    r, w = os.pipe(); os.write(w, b"ab")
+    f = fdopen(r, b"r"); assert f
+    assert fgetc(f) == ord('a') and os.read(r, 1) == b"b"
+    assert flush(f) == 0 and fclose(f) == 0
+    os.close(w)
+    print("stdio host checks passed (buffering, positioning, sync, errors and pipes)")

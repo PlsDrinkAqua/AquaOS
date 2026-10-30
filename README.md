@@ -32,3 +32,6 @@ state. See [networking](docs/NETWORKING.md#dhcp-configuration-and-netinfo).
 `bmpview /demo.bmp` displays the included 24-bit BMP test card on the framebuffer.
 Press any key to return; Ctrl+C also restores the terminal. See
 [graphics and BMP support](docs/GRAPHICS.md).
+
+Regular-file stdio uses libc read-ahead and a bounded write-through kernel disk
+page cache. See [read buffering and caching](docs/CACHING.md).

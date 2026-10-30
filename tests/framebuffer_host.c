@@ -67,5 +67,17 @@ int main(void) {
     red_pos=0; green_pos=8; blue_pos=16;
     storage[0]=0x123456; present(0,0,1,1); assert(screen[0]==0x563412);
     for(unsigned y=0;y<18;y++) assert(screen[y*14+12]==0xdeadbeef && screen[y*14+13]==0xdeadbeef);
+    memset(storage,0,sizeof(storage));
+    memset(screen,0,sizeof(screen));
+    red_pos=16; green_pos=8; blue_pos=0;
+    framebuffer_begin_update();
+    framebuffer_begin_update();
+    framebuffer_cell(0,0,0x1741);
+    assert(storage[1*12+2]!=0 && screen[1*14+2]==0);
+    framebuffer_end_update();
+    assert(screen[1*14+2]==0);
+    framebuffer_end_update();
+    assert(screen[1*14+2]==storage[1*12+2]);
+    assert(!update_depth);
     puts("Framebuffer clipping, backbuffer, pitch, channel conversion and ownership passed.");
 }

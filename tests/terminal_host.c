@@ -14,6 +14,32 @@ int main(void) {
     screen[0] = screen[2001] = 0x1234;
     terminal_buffer = screen + 1;
     terminal_clear();
+    terminal_writestring("\033[?25l");
+    assert(!cursor_enabled && !cursor_drawn);
+    terminal_writestring("\033[?25h");
+    assert(cursor_enabled && cursor_drawn);
+    uint16_t before[2000];
+    memcpy(before, terminal_buffer, sizeof(before));
+    terminal_begin_update();
+    terminal_begin_update();
+    terminal_writestring("\033[?25l\033[HNEW");
+    assert(!memcmp(before, terminal_buffer, sizeof(before)));
+    terminal_end_update();
+    assert(!memcmp(before, terminal_buffer, sizeof(before)));
+    terminal_writestring("\033[2;3Hframe\033[?25");
+    terminal_writestring("h"); /* CSI split across chunks. */
+    assert(!memcmp(before, terminal_buffer, sizeof(before)));
+    terminal_end_update();
+    assert((terminal_buffer[0]&255)=='N' && (terminal_buffer[82]&255)=='f');
+    assert(cursor_enabled && cursor_drawn && !update_depth);
+    terminal_begin_update();
+    terminal_writestring("\033[3~deferred");
+    memcpy(before, terminal_buffer, sizeof(before));
+    terminal_end_update();
+    assert(!memcmp(before, terminal_buffer, sizeof(before))); /* Explicit batch wins. */
+    terminal_writestring("\033[4~");
+    assert(memcmp(before, terminal_buffer, sizeof(before)));
+    terminal_clear();
     terminal_writestring("abc\rX");
     assert(terminal_row == 0 && terminal_column == 1);
     assert((screen[1] & 255) == 'X' && (screen[2] & 255) == 'b');

@@ -127,6 +127,12 @@ void syscall_handler(interrupt_frame_t *regs)
                 regs->eax = (uintptr_t)-K_EFAULT;
                 break;
             }
+            int type = fd_type((int)regs->ebx);
+            int terminal_output = type == FD_STDOUT || type == FD_STDERR;
+            if (terminal_output) {
+                task_preemption_disable();
+                terminal_begin_update();
+            }
             while (written < count) {
                 uint32_t wanted = count - written;
                 int n;
@@ -147,6 +153,10 @@ void syscall_handler(interrupt_frame_t *regs)
                 written += (uintptr_t)n;
                 regs->eax = written;
                 if ((uintptr_t)n < wanted) break;
+            }
+            if (terminal_output) {
+                terminal_end_update();
+                task_preemption_enable();
             }
             break;
         }

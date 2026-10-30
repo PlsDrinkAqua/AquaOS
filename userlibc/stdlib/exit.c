@@ -1,7 +1,9 @@
 #include <stdlib.h>
 #include <aquaos/syscall.h>
 
+#include "../stdio/internal.h"
 void exit(int status) {
+    (void)__aquaos_stdio_sync_inputs();
     aquaos_syscall1(SYS_EXIT, status);
 
     for (;;) {

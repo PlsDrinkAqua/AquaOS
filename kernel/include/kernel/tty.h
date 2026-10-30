@@ -6,6 +6,9 @@
 void terminal_initialize(void);
 void terminal_clear(void);
 void terminal_refresh(void);
+/* Nestable kernel output transaction; caller prevents task interleaving. */
+void terminal_begin_update(void);
+void terminal_end_update(void);
 /* Positive rows browse older output; negative rows browse newer output. */
 void terminal_scroll_view(int rows);
 void terminal_follow_output(void);

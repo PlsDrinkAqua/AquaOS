@@ -95,3 +95,27 @@ cc -Wall -Wextra -Werror -fsanitize=address,undefined -I kernel/include \
   -idirafter userlibc/include tests/framebuffer_host.c -o /tmp/aquaos-fbcheck
 /tmp/aquaos-fbcheck
 ```
+
+## Full-screen redraws
+
+The terminal recognizes DEC `CSI ?25l` / `CSI ?25h` cursor hide/show sequences,
+including sequences split across writes. Unknown private modes are ignored.
+
+A userspace stdout/stderr write is rendered as one transaction across all of
+its 256-byte syscall copy chunks. Task preemption is disabled until the terminal
+model is updated and committed. Explicit shell begin/end redraw sequences still
+work and can defer a transaction's presentation further. Nested kernel updates
+flush only on the outermost end.
+
+At commit, the terminal compares visible character cells, renders changed glyphs
+and the final cursor into the RAM backbuffer, then submits their bounding rectangle.
+Unchanged cells avoid glyph rendering; forced refresh still repaints after image
+viewing or framebuffer initialization. This removes intermediate character/cursor
+updates during Kilo scrolling without changing the editor. It does not add hardware
+vsync or page flipping, and does not combine separate application write calls into
+one frame.
+
+Run `python3 tests/kilo_scroll.py` after building the ISO and staging TinyCC. It
+scrolls the actual `tcc.h` through 1500 downward steps, a rapid input burst, and
+upward movement, comparing source rows and full terminal framebuffer pixels to
+the embedded font and VGA palette.
