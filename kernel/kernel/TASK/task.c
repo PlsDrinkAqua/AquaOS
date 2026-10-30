@@ -1,3 +1,4 @@
+#include <kernel/framebuffer.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -634,6 +635,7 @@ int task_exec_current(const char *path, const char *const *argv, const char *con
         return -K_ENOENT;
     }
 
+    framebuffer_release(current_task->pid);
     fpu_reset(current_task);
     current_task->address_space = new_pd;
     vmm_switch_address_space(new_pd);
@@ -946,6 +948,7 @@ void task_exit_current(int status, interrupt_frame_t *regs) {
     }
 
     exiting = current_task;
+    framebuffer_release(exiting->pid);
     if (terminal_owner == exiting->pid) {
         terminal_owner = exiting->terminal_parent;
         exiting->terminal_parent = 0;

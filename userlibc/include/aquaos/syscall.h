@@ -43,6 +43,9 @@ enum {
     SYS_TCP_STATUS = 37,
     SYS_TCP_SHUTDOWN = 38,
     SYS_NET_INFO = 39,
+    SYS_DISPLAY_INFO = 40,
+    SYS_DISPLAY_SHOW = 41,
+    SYS_DISPLAY_RESTORE = 42,
 };
 
 #ifdef __cplusplus

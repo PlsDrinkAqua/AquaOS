@@ -5,6 +5,7 @@ import argparse
 import os
 import subprocess
 import tempfile
+from bmp_demo import demo_bmp
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/x86_64'
@@ -28,6 +29,9 @@ def create(output):
             stream.truncate(100 * 1024 * 1024)
         subprocess.run(['mkfs.ext2', '-q', '-F', '-b', '4096', str(image)], check=True)
         commands = ['mkdir /bin', 'mkdir /tmp', 'mkdir /etc']
+        demo = Path(tmp)/'demo.bmp'
+        demo.write_bytes(demo_bmp())
+        commands.append(f'write {quote(demo)} /demo.bmp')
         commands.append(f'write {quote(ROOT / "ports/kilo/COPYING")} /etc/kilo.COPYING')
         for program in sorted((OUT/'user').iterdir()):
             if program.is_file():

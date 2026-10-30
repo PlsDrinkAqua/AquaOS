@@ -52,15 +52,16 @@ void kernel_main(multiboot_info_t* mbd, uint32_t magic) {
 
 	kprintf("Initilizing Virtual Memory Manager.................");
 	vmm_init();
+
+	kprintf("done \n");
+
+	kprintf("Initilizing Kernel Heap Allocator.................");
+	vmm_heap_init();
     if (magic == MULTIBOOT_BOOTLOADER_MAGIC &&
         framebuffer_init((const void *)(KERNEL_DIRECT_BASE + (uintptr_t)mbd))) {
         terminal_refresh();
         kprintf("Display: RGB framebuffer, 80x25 console\n");
     }
-	kprintf("done \n");
-
-	kprintf("Initilizing Kernel Heap Allocator.................");
-	vmm_heap_init();
 	kprintf("done \n");
 
 	kprintf("Initilizing PIC.................");

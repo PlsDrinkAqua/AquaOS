@@ -514,3 +514,9 @@ redirects, chunked decoding, preservation of existing files on failure,
 temporary-name collisions/cleanup, and the TCP descriptor regressions. It needs
 no Internet and uses a disposable ext2 disk. See
 [HTTP downloader](../docs/NETWORKING.md#tcp-active-open-clients-and-http).
+
+`python3 tests/graphics_smoke.py` checks software framebuffer graphics and the
+BMP viewer after building the kernel/userspace and ISO. It uses a disposable
+ext2 disk and validates actual QEMU screenshot pixels, display syscall bounds
+and ownership, terminal restoration, and scrollback. Host sanitizer checks are
+listed in [graphics](../docs/GRAPHICS.md).

@@ -78,8 +78,8 @@ separate device window. RGB channel ordering follows the boot information.
 The 80x25 terminal is rendered with an embedded public-domain 8x16 bitmap font,
 centered on the screen. Existing colours, editing, cursor and 1000-line
 scrollback retain their character-based representation. Non-ASCII bytes render
-as question marks. There is no GPU acceleration, mouse, image viewer or window
-server in this first backend.
+as question marks. There is no GPU acceleration, mouse or window server yet.
+`bmpview` provides temporary full-screen image display; see [graphics](GRAPHICS.md).
 
 A character mirror (`terminal_screen`) in kernel RAM lets QEMU regression tools
 inspect terminal contents without reading VGA text memory in graphics mode.
@@ -92,6 +92,6 @@ Host renderer validation:
 
 ```sh
 cc -Wall -Wextra -Werror -fsanitize=address,undefined -I kernel/include \
-  tests/framebuffer_host.c -o /tmp/aquaos-fbcheck
+  -idirafter userlibc/include tests/framebuffer_host.c -o /tmp/aquaos-fbcheck
 /tmp/aquaos-fbcheck
 ```

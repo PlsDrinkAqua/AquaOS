@@ -28,3 +28,7 @@ See [file commands](docs/FILE_COMMANDS.md) for behavior and limits.
 Networking obtains IPv4, subnet, gateway, and DNS through DHCP, with a static
 QEMU development fallback. Run `netinfo` to inspect configuration and lease
 state. See [networking](docs/NETWORKING.md#dhcp-configuration-and-netinfo).
+
+`bmpview /demo.bmp` displays the included 24-bit BMP test card on the framebuffer.
+Press any key to return; Ctrl+C also restores the terminal. See
+[graphics and BMP support](docs/GRAPHICS.md).

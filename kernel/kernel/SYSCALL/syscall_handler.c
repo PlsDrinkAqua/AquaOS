@@ -1,4 +1,7 @@
 #include <stdint.h>
+#include <aquaos/display.h>
+#include <kernel/framebuffer.h>
+#include <kernel/kmalloc.h>
 #include <kernel/net.h>
 #include <aquaos/net_abi.h>
 #include <kernel/timer.h>
@@ -56,6 +59,9 @@ enum {
     SYS_TCP_STATUS = 37,
     SYS_TCP_SHUTDOWN = 38,
     SYS_NET_INFO = 39,
+    SYS_DISPLAY_INFO = 40,
+    SYS_DISPLAY_SHOW = 41,
+    SYS_DISPLAY_RESTORE = 42,
 };
 
 void syscall_handler(interrupt_frame_t *regs)
@@ -63,6 +69,42 @@ void syscall_handler(interrupt_frame_t *regs)
     task_reap_exited_children();
 
     switch (regs->eax) {
+        case SYS_DISPLAY_INFO: {
+            aquaos_display_info info;
+            int result=framebuffer_info(&info.width,&info.height) ?
+                (copy_to_user((void *)regs->ebx,&info,sizeof(info))<0 ? -K_EFAULT : 0) : -K_ENODEV;
+            regs->eax=(uintptr_t)result;
+            break;
+        }
+        case SYS_DISPLAY_SHOW: {
+            aquaos_display_request r;
+            int result;
+            if (!task_terminal_can_read(task_current())) { regs->eax=(uintptr_t)-K_EACCES; break; }
+            if (copy_from_user(&r,(void *)regs->ebx,sizeof(r))<0) { regs->eax=(uintptr_t)-K_EFAULT; break; }
+            /* Bound allocations and multiplication before touching user pixels. */
+            if (!r.width || !r.height || r.width>2048 || r.height>2048 ||
+                (uint64_t)r.width*r.height>1048576) { regs->eax=(uintptr_t)-K_EINVAL; break; }
+            size_t bytes=(size_t)r.width*r.height*4;
+            if (!vmm_user_range_valid((void *)(uintptr_t)r.pixels,bytes,false)) { regs->eax=(uintptr_t)-K_EFAULT; break; }
+            uint32_t *snapshot=kmalloc(bytes);
+            if(!snapshot) { regs->eax=(uintptr_t)-K_ENOMEM; break; }
+            result=copy_from_user(snapshot,(void *)(uintptr_t)r.pixels,bytes)<0 ? -K_EFAULT : 0;
+            if(result>=0) {
+                task_preemption_disable();
+                result=framebuffer_show(task_current()->pid,snapshot,r.width,r.height,r.x,r.y);
+                task_preemption_enable();
+            }
+            kfree(snapshot);
+            regs->eax=(uintptr_t)result;
+            break;
+        }
+        case SYS_DISPLAY_RESTORE:
+            task_preemption_disable();
+            framebuffer_release(task_current()->pid);
+            task_preemption_enable();
+            regs->eax=0;
+            break;
+
         case SYS_PUTCHAR: {
             char c = (char)regs->ebx;
             int result = fd_write(1, &c, 1);

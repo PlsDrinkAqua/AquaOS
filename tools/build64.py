@@ -16,8 +16,8 @@ FLAGS = ['-nostdinc', '-isystem', COMPILER_HEADERS, '-m64', '-O2', '-g', '-ffree
 KFLAGS = ['-D__is_libk', '-D__is_kernel', '-mcmodel=kernel', '-mgeneral-regs-only', '-I'+str(ROOT/'kernel/include'),
           '-I'+str(ROOT/'libk/include'), '-I'+str(ROOT/'userlibc/include')]
 UFLAGS = ['-I'+str(ROOT/'userlibc/include')]
-PROGRAMS = ['shell', 'hello', 'cat', 'cp', 'mv', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo', 'ping', 'udpecho', 'nslookup', 'httpget', 'netinfo']
-TESTS = {'tcpcheck': 'tcp_user', 'largefilecheck': 'large_file', 'highmemcheck': 'high_memory', 'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
+PROGRAMS = ['bmpview', 'shell', 'hello', 'cat', 'cp', 'mv', 'ls', 'echo', 'mkdir', 'rm', 'rmdir', 'kilo', 'ping', 'udpecho', 'nslookup', 'httpget', 'netinfo']
+TESTS = {'displaycheck': 'display_user', 'tcpcheck': 'tcp_user', 'largefilecheck': 'large_file', 'highmemcheck': 'high_memory', 'fscheck': 'fs_delete', 'memcheck': 'memory_stress', 'libccheck': 'libc_core',
          'stdiocheck': 'stdio_core', 'intcheck': 'interrupt', 'abi64check': 'abi64'}
 
 def run(args):
